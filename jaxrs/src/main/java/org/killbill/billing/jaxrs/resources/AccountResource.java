@@ -1,7 +1,7 @@
 /*
  * Copyright 2010-2013 Ning, Inc.
- * Copyright 2014-2016 Groupon, Inc
- * Copyright 2014-2016 The Billing Project, LLC
+ * Copyright 2014-2017 Groupon, Inc
+ * Copyright 2014-2017 The Billing Project, LLC
  *
  * The Billing Project licenses this file to you under the Apache License, version 2.0
  * (the "License"); you may not use this file except in compliance with the
@@ -59,16 +59,22 @@ import org.killbill.billing.account.api.AccountData;
 import org.killbill.billing.account.api.AccountEmail;
 import org.killbill.billing.account.api.AccountUserApi;
 import org.killbill.billing.account.api.MutableAccountData;
+import org.killbill.billing.catalog.api.BillingActionPolicy;
 import org.killbill.billing.catalog.api.CatalogApiException;
 import org.killbill.billing.catalog.api.Currency;
+import org.killbill.billing.catalog.api.ProductCategory;
 import org.killbill.billing.entitlement.api.BlockingState;
 import org.killbill.billing.entitlement.api.BlockingStateType;
+import org.killbill.billing.entitlement.api.Entitlement.EntitlementActionPolicy;
 import org.killbill.billing.entitlement.api.EntitlementApiException;
+import org.killbill.billing.entitlement.api.Subscription;
 import org.killbill.billing.entitlement.api.SubscriptionApi;
 import org.killbill.billing.entitlement.api.SubscriptionApiException;
 import org.killbill.billing.entitlement.api.SubscriptionBundle;
 import org.killbill.billing.invoice.api.Invoice;
 import org.killbill.billing.invoice.api.InvoiceApiException;
+import org.killbill.billing.invoice.api.InvoiceItem;
+import org.killbill.billing.invoice.api.InvoiceItemType;
 import org.killbill.billing.invoice.api.InvoicePayment;
 import org.killbill.billing.invoice.api.InvoicePaymentApi;
 import org.killbill.billing.invoice.api.InvoiceUserApi;
@@ -115,6 +121,7 @@ import org.killbill.billing.util.callcontext.CallContext;
 import org.killbill.billing.util.callcontext.TenantContext;
 import org.killbill.billing.util.config.definition.JaxrsConfig;
 import org.killbill.billing.util.config.definition.PaymentConfig;
+import org.killbill.billing.util.customfield.CustomField;
 import org.killbill.billing.util.entity.Pagination;
 import org.killbill.billing.util.tag.ControlTagType;
 import org.killbill.billing.util.tag.Tag;
@@ -359,6 +366,7 @@ public class AccountResource extends JaxRsResourceBase {
         return uriBuilder.buildResponse(uriInfo, AccountResource.class, "getAccount", account.getId(), request);
     }
 
+
     @TimedResource
     @PUT
     @Consumes(APPLICATION_JSON)
@@ -385,25 +393,71 @@ public class AccountResource extends JaxRsResourceBase {
         return getAccount(accountId, false, false, new AuditMode(AuditLevel.NONE.toString()), request);
     }
 
-    // Not supported
+
     @TimedResource
     @DELETE
     @Path("/{accountId:" + UUID_PATTERN + "}")
     @Produces(APPLICATION_JSON)
-    @ApiOperation(value = "Delete account", hidden = true)
+    @ApiOperation(value = "Close account")
     @ApiResponses(value = {@ApiResponse(code = 400, message = "Invalid account id supplied")})
-    public Response cancelAccount(@PathParam("accountId") final String accountId,
-                                  @javax.ws.rs.core.Context final HttpServletRequest request) {
-        /*
-        try {
-            accountUserApi.cancelAccount(accountId);
-            return Response.status(Status.NO_CONTENT).build();
-        } catch (AccountApiException e) {
-            log.info(String.format("Failed to cancel account %s", accountId), e);
-            return Response.status(Status.BAD_REQUEST).build();
+    public Response closeAccount(@PathParam(QUERY_ACCOUNT_ID) final String accountIdStr,
+                                 @QueryParam(QUERY_CANCEL_ALL_SUBSCRIPTIONS) @DefaultValue("false") final Boolean cancelAllSubscriptions,
+                                 @QueryParam(QUERY_WRITE_OFF_UNPAID_INVOICES) @DefaultValue("false") final Boolean writeOffUnpaidInvoices,
+                                 @QueryParam(QUERY_ITEM_ADJUST_UNPAID_INVOICES) @DefaultValue("false") final Boolean itemAdjustUnpaidInvoices,
+                                 @HeaderParam(HDR_CREATED_BY) final String createdBy,
+                                 @HeaderParam(HDR_REASON) final String reason,
+                                 @HeaderParam(HDR_COMMENT) final String comment,
+                                 @javax.ws.rs.core.Context final HttpServletRequest request) throws SubscriptionApiException, AccountApiException, EntitlementApiException, InvoiceApiException, TagApiException {
+        final CallContext callContext = context.createContext(createdBy, reason, comment, request);
+        final UUID accountId = UUID.fromString(accountIdStr);
+
+        if (cancelAllSubscriptions) {
+            final List<SubscriptionBundle> bundles = subscriptionApi.getSubscriptionBundlesForAccountId(accountId, callContext);
+            final Iterable<Subscription> subscriptions = Iterables.concat(Iterables.transform(bundles, new Function<SubscriptionBundle, List<Subscription>>() {
+                @Override
+                public List<Subscription> apply(final SubscriptionBundle input) {
+                    return input.getSubscriptions();
+                }
+            }));
+
+            final Iterable<Subscription> toBeCancelled = Iterables.filter(subscriptions, new Predicate<Subscription>() {
+                @Override
+                public boolean apply(final Subscription input) {
+                    return input.getLastActiveProductCategory() != ProductCategory.ADD_ON && input.getBillingEndDate() == null;
+                }
+            });
+            for (final Subscription cur : toBeCancelled) {
+                cur.cancelEntitlementWithPolicyOverrideBillingPolicy(EntitlementActionPolicy.IMMEDIATE, BillingActionPolicy.END_OF_TERM, ImmutableList.<PluginProperty>of(), callContext);
+            }
         }
-       */
-        return Response.status(Status.INTERNAL_SERVER_ERROR).build();
+
+        final Collection<Invoice> unpaidInvoices = writeOffUnpaidInvoices || itemAdjustUnpaidInvoices ? invoiceApi.getUnpaidInvoicesByAccountId(accountId, null, callContext) : ImmutableList.<Invoice>of();
+        if (writeOffUnpaidInvoices) {
+            for (final Invoice cur : unpaidInvoices) {
+                invoiceApi.tagInvoiceAsWrittenOff(cur.getId(), callContext);
+            }
+        } else if (itemAdjustUnpaidInvoices) {
+
+            final List<InvoiceItemType> ADJUSTABLE_TYPES = ImmutableList.<InvoiceItemType>of(InvoiceItemType.EXTERNAL_CHARGE,
+                                                                                             InvoiceItemType.FIXED,
+                                                                                             InvoiceItemType.RECURRING,
+                                                                                             InvoiceItemType.TAX,
+                                                                                             InvoiceItemType.USAGE,
+                                                                                             InvoiceItemType.PARENT_SUMMARY);
+            final String description = comment != null ? comment : "Close Account";
+            for (final Invoice invoice : unpaidInvoices) {
+                for (final InvoiceItem item : invoice.getInvoiceItems()) {
+                    if (ADJUSTABLE_TYPES.contains(item.getInvoiceItemType())) {
+                        invoiceApi.insertInvoiceItemAdjustment(accountId, invoice.getId(), item.getId(), clock.getUTCToday(), description, callContext);
+                    }
+                }
+            }
+        }
+
+        final BlockingStateJson blockingState = new BlockingStateJson(accountIdStr, "CLOSE_ACCOUNT", "account-service", true, false, false, null, BlockingStateType.ACCOUNT, null);
+        addBlockingState(blockingState, accountIdStr, BlockingStateType.ACCOUNT, null, ImmutableList.<String>of(), createdBy, reason, comment, request);
+
+        return Response.status(Status.OK).build();
     }
 
     @TimedResource
@@ -1119,6 +1173,25 @@ public class AccountResource extends JaxRsResourceBase {
                                     @QueryParam(QUERY_AUDIT) @DefaultValue("NONE") final AuditMode auditMode,
                                     @javax.ws.rs.core.Context final HttpServletRequest request) {
         return super.getCustomFields(UUID.fromString(id), auditMode, context.createContext(request));
+    }
+
+    @TimedResource
+    @GET
+    @Path("/{accountId:" + UUID_PATTERN + "}/" + ALL_CUSTOM_FIELDS)
+    @Produces(APPLICATION_JSON)
+    @ApiOperation(value = "Retrieve account customFields", response = CustomFieldJson.class, responseContainer = "List")
+    @ApiResponses(value = {@ApiResponse(code = 400, message = "Invalid account id supplied"),
+                           @ApiResponse(code = 404, message = "Account not found")})
+    public Response getAllCustomFields(@PathParam(ID_PARAM_NAME) final String accountIdString,
+                                       @QueryParam(QUERY_OBJECT_TYPE) final ObjectType objectType,
+                                       @QueryParam(QUERY_AUDIT) @DefaultValue("NONE") final AuditMode auditMode,
+                                       @javax.ws.rs.core.Context final HttpServletRequest request) {
+        final UUID accountId = UUID.fromString(accountIdString);
+        final TenantContext tenantContext = context.createContext(request);
+        final List<CustomField> customFields = objectType != null ?
+                                               customFieldUserApi.getCustomFieldsForAccountType(accountId, objectType, tenantContext) :
+                                               customFieldUserApi.getCustomFieldsForAccount(accountId, tenantContext);
+        return createCustomFieldResponse(customFields, auditMode, tenantContext);
     }
 
     @TimedResource

@@ -1,7 +1,9 @@
 /*
  * Copyright 2010-2013 Ning, Inc.
+ * Copyright 2014-2017 Groupon, Inc
+ * Copyright 2014-2017 The Billing Project, LLC
  *
- * Ning licenses this file to you under the Apache License, version 2.0
+ * The Billing Project licenses this file to you under the Apache License, version 2.0
  * (the "License"); you may not use this file except in compliance with the
  * License.  You may obtain a copy of the License at:
  *
@@ -25,44 +27,44 @@ import org.killbill.billing.callcontext.InternalTenantContext;
 import org.killbill.billing.util.audit.ChangeType;
 import org.killbill.billing.util.entity.dao.Audited;
 import org.killbill.billing.util.entity.dao.EntitySqlDao;
-import org.killbill.billing.util.entity.dao.EntitySqlDaoStringTemplate;
+import org.killbill.commons.jdbi.template.KillBillSqlDaoStringTemplate;
 import org.skife.jdbi.v2.sqlobject.Bind;
-import org.skife.jdbi.v2.sqlobject.BindBean;
+import org.killbill.commons.jdbi.binder.SmartBindBean;
 import org.skife.jdbi.v2.sqlobject.SqlQuery;
 import org.skife.jdbi.v2.sqlobject.SqlUpdate;
 
-@EntitySqlDaoStringTemplate
+@KillBillSqlDaoStringTemplate
 public interface AccountSqlDao extends EntitySqlDao<AccountModelDao, Account> {
 
     @SqlQuery
     public AccountModelDao getAccountByKey(@Bind("externalKey") final String key,
-                                           @BindBean final InternalTenantContext context);
+                                           @SmartBindBean final InternalTenantContext context);
 
     @SqlQuery
     public UUID getIdFromKey(@Bind("externalKey") final String key,
-                             @BindBean final InternalTenantContext context);
+                             @SmartBindBean final InternalTenantContext context);
 
     @SqlQuery
     public Integer getBCD(@Bind("id") String accountId,
-                       @BindBean final InternalTenantContext context);
+                          @SmartBindBean final InternalTenantContext context);
 
     @SqlUpdate
     @Audited(ChangeType.UPDATE)
-    public void update(@BindBean final AccountModelDao account,
-                       @BindBean final InternalCallContext context);
+    public void update(@SmartBindBean final AccountModelDao account,
+                       @SmartBindBean final InternalCallContext context);
 
     @SqlUpdate
     @Audited(ChangeType.UPDATE)
-    public void updatePaymentMethod(@Bind("id") String accountId,
-                                    @Bind("paymentMethodId") String paymentMethodId,
-                                    @BindBean final InternalCallContext context);
+    public Object updatePaymentMethod(@Bind("id") String accountId,
+                                      @Bind("paymentMethodId") String paymentMethodId,
+                                      @SmartBindBean final InternalCallContext context);
 
     @SqlQuery
     List<AccountModelDao> getAccountsByParentId(@Bind("parentAccountId") UUID parentAccountId,
-                                                @BindBean final InternalTenantContext context);
+                                                @SmartBindBean final InternalTenantContext context);
 
     @SqlQuery
     public AccountModelDao luckySearch(@Bind("searchKey") final String searchKey,
-                                       @BindBean final InternalTenantContext context);
+                                       @SmartBindBean final InternalTenantContext context);
 
 }

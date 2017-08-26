@@ -2,7 +2,7 @@
 
 Kill Bill is the Open-Source Billing & Payment Platform.
 
-Among features:
+## Among features
 
 * Subscription engine, with plans management (trial, upgrade, downgrade, etc.), support of add-ons, bundles with multiple subscriptions
 * Invoicing engine, supporting different billing alignments, recurring and one-time charges, international tax, metered billing
@@ -16,6 +16,16 @@ You can find more information on [killbill.io](http://killbill.io).
 * [Tutorials](http://killbill.io/tutorials/)
 * [User guides](http://killbill.io/userguide/) (source in the [killbill-docs](https://github.com/killbill/killbill-docs) repo)
 * [Wiki](https://github.com/killbill/killbill/wiki)
+
+## Build
+
+Build is handled by Maven:
+
+```
+mvn clean install -DskipTests=true
+```
+
+Note: some third-party artifacts (such as metrics-guice) are released in Bintray. Make sure to follow the instructions [here](https://bintray.com/bintray/jcenter) (Set me up! button) to update your settings.xml.
 
 ## License
 

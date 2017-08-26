@@ -1,7 +1,7 @@
 /*
  * Copyright 2010-2013 Ning, Inc.
- * Copyright 2014 Groupon, Inc
- * Copyright 2014 The Billing Project, LLC
+ * Copyright 2014-2017 Groupon, Inc
+ * Copyright 2014-2017 The Billing Project, LLC
  *
  * The Billing Project licenses this file to you under the Apache License, version 2.0
  * (the "License"); you may not use this file except in compliance with the
@@ -27,11 +27,11 @@ import java.util.UUID;
 
 import org.joda.time.DateTime;
 import org.killbill.billing.catalog.api.BillingPeriod;
-import org.killbill.billing.catalog.api.CatalogApiException;
 import org.killbill.billing.catalog.api.Currency;
 import org.killbill.billing.catalog.api.ProductCategory;
 import org.killbill.billing.catalog.api.TimeUnit;
 import org.killbill.billing.client.KillBillClientException;
+import org.killbill.billing.client.KillBillHttpClient;
 import org.killbill.billing.client.RequestOptions;
 import org.killbill.billing.client.model.Catalog;
 import org.killbill.billing.client.model.Plan;
@@ -43,7 +43,9 @@ import org.killbill.billing.client.model.Usage;
 import org.testng.Assert;
 import org.testng.annotations.Test;
 
+import com.google.common.collect.HashMultimap;
 import com.google.common.collect.ImmutableList;
+import com.google.common.collect.Multimap;
 import com.google.common.io.Resources;
 
 public class TestCatalog extends TestJaxrsBase {
@@ -105,7 +107,7 @@ public class TestCatalog extends TestJaxrsBase {
         Assert.assertEquals(catalogsJson.get(0).getEffectiveDate(), Date.valueOf("2011-01-01"));
         Assert.assertEquals(catalogsJson.get(0).getCurrencies().size(), 3);
         Assert.assertEquals(catalogsJson.get(0).getProducts().size(), 11);
-        Assert.assertEquals(catalogsJson.get(0).getPriceLists().size(), 6);
+        Assert.assertEquals(catalogsJson.get(0).getPriceLists().size(), 7);
 
         for (final Product productJson : catalogsJson.get(0).getProducts()) {
             if (!"BASE".equals(productJson.getType())) {
@@ -149,12 +151,12 @@ public class TestCatalog extends TestJaxrsBase {
         Assert.assertEquals(foundBasePlans, allBasePlans);
     }
 
-    @Test(groups = "slow", description = "Try to retrieve a json version of the catalog with an invalid date",
-            expectedExceptions = KillBillClientException.class,
-            expectedExceptionsMessageRegExp = "There is no catalog version that applies for the given date.*")
+    @Test(groups = "slow", description = "Try to retrieve a json version of the catalog with an invalid date")
     public void testCatalogInvalidDate() throws Exception {
         final List<Catalog> catalogsJson = killBillClient.getJSONCatalog(DateTime.parse("2008-01-01"), requestOptions);
-        Assert.fail();
+        Assert.assertEquals(catalogsJson.size(), 1);
+        // Return the oldest catalog
+        Assert.assertEquals(catalogsJson.get(0).getEffectiveDate().compareTo(new DateTime(2011, 1, 1, 0, 0).toDate()), 0);
     }
 
     @Test(groups = "slow", description = "Can create a simple Plan into a per-tenant catalog")
@@ -222,6 +224,24 @@ public class TestCatalog extends TestJaxrsBase {
         Assert.assertEquals(catalogsJson.get(0).getPriceLists().get(0).getPlans().size(), 2);
     }
 
+    @Test(groups = "slow")
+    public void testCatalogDeletionInTestMode() throws Exception {
 
+        killBillClient.addSimplePan(new SimplePlan("something-monthly", "Something", ProductCategory.BASE, Currency.USD, BigDecimal.TEN, BillingPeriod.MONTHLY, 0, TimeUnit.UNLIMITED, ImmutableList.<String>of()), requestOptions);
+        List<Catalog> catalogsJson = killBillClient.getJSONCatalog(requestOptions);
+        Assert.assertEquals(catalogsJson.size(), 1);
 
+        final String uri = "/1.0/kb/test/catalog";
+
+        final Multimap result = HashMultimap.create();
+        result.put(KillBillHttpClient.AUDIT_OPTION_CREATED_BY, createdBy);
+        result.put(KillBillHttpClient.AUDIT_OPTION_REASON, reason);
+        result.put(KillBillHttpClient.AUDIT_OPTION_COMMENT, comment);
+        killBillHttpClient.doDelete(uri, requestOptions);
+
+        // Verify that we see no catalog -- and in particular not the KB default catalog
+        catalogsJson = killBillClient.getJSONCatalog(requestOptions);
+        Assert.assertEquals(catalogsJson.size(), 0);
+
+    }
 }

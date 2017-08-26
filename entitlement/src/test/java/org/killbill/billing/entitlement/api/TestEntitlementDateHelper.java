@@ -26,6 +26,7 @@ import org.joda.time.LocalDate;
 import org.killbill.billing.GuicyKillbillTestSuiteNoDB;
 import org.killbill.billing.account.api.Account;
 import org.killbill.billing.account.api.AccountApiException;
+import org.killbill.billing.callcontext.InternalTenantContext;
 import org.killbill.billing.entitlement.EntitlementTestSuiteNoDB;
 import org.killbill.billing.mock.MockAccountBuilder;
 import org.testng.Assert;
@@ -42,7 +43,7 @@ public class TestEntitlementDateHelper extends EntitlementTestSuiteNoDB {
     public void beforeMethod() throws Exception {
         super.beforeClass();
 
-        dateHelper = new EntitlementDateHelper(clock);
+        dateHelper = new EntitlementDateHelper();
         clock.resetDeltaFromReality();
     }
 
@@ -54,7 +55,7 @@ public class TestEntitlementDateHelper extends EntitlementTestSuiteNoDB {
         final DateTime referenceDateTime = new DateTime(2013, 1, 1, 15, 43, 25, 0, DateTimeZone.UTC);
         createAccount(DateTimeZone.UTC, referenceDateTime);
 
-        final DateTime targetDate = dateHelper.fromLocalDateAndReferenceTime(initialDate, internalCallContext);
+        final DateTime targetDate = dateHelper.fromLocalDateAndReferenceTime(initialDate, clock.getUTCNow(), internalCallContext);
         final DateTime expectedDate = new DateTime(2013, 8, 7, 15, 43, 25, 0, DateTimeZone.UTC);
         Assert.assertEquals(targetDate, expectedDate);
     }
@@ -71,7 +72,7 @@ public class TestEntitlementDateHelper extends EntitlementTestSuiteNoDB {
 
         createAccount(timeZoneUtcMinus8, referenceDateTime);
 
-        final DateTime targetDate = dateHelper.fromLocalDateAndReferenceTime(inputDate, internalCallContext);
+        final DateTime targetDate = dateHelper.fromLocalDateAndReferenceTime(inputDate, clock.getUTCNow(), internalCallContext);
 
         // Things to verify:
         // 1. Verify the resulting DateTime brings us back into the correct LocalDate (in the account timezone)
@@ -97,7 +98,7 @@ public class TestEntitlementDateHelper extends EntitlementTestSuiteNoDB {
 
         createAccount(timeZoneUtcPlus5, referenceDateTime);
 
-        final DateTime targetDate = dateHelper.fromLocalDateAndReferenceTime(inputDate, internalCallContext);
+        final DateTime targetDate = dateHelper.fromLocalDateAndReferenceTime(inputDate, clock.getUTCNow(), internalCallContext);
 
         // Things to verify:
         // 1. Verify the resulting DateTime brings us back into the correct LocalDate (in the account timezone)
@@ -124,7 +125,21 @@ public class TestEntitlementDateHelper extends EntitlementTestSuiteNoDB {
         // Check that our input date is greater than now
         assertTrue(inputDateEquals.compareTo(clock.getUTCNow()) > 0);
         // And yet since the LocalDate match the function returns true
-        assertTrue(dateHelper.isBeforeOrEqualsToday(inputDateEquals, timeZoneUtcMinus8, internalCallContext));
+        assertTrue(isBeforeOrEqualsToday(inputDateEquals, timeZoneUtcMinus8, internalCallContext));
+    }
+
+    /**
+     * Check if the date portion of a date/time is before or equals at now (as returned by the clock).
+     *
+     * @param inputDate             the fully qualified DateTime
+     * @param accountTimeZone       the account timezone
+     * @param internalTenantContext the context
+     * @return true if the inputDate, once converted into a LocalDate using account timezone is less or equals than today
+     */
+    private boolean isBeforeOrEqualsToday(final DateTime inputDate, final DateTimeZone accountTimeZone, final InternalTenantContext internalTenantContext) {
+        final LocalDate localDateNowInAccountTimezone = clock.getToday(accountTimeZone);
+        final LocalDate targetDateInAccountTimezone = internalTenantContext.toLocalDate(inputDate);
+        return targetDateInAccountTimezone.compareTo(localDateNowInAccountTimezone) <= 0;
     }
 
     private void createAccount(final DateTimeZone dateTimeZone, final DateTime referenceDateTime) throws AccountApiException {

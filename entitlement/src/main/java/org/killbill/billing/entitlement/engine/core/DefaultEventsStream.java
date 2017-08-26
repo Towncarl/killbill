@@ -27,7 +27,6 @@ import java.util.UUID;
 import javax.annotation.Nullable;
 
 import org.joda.time.DateTime;
-import org.joda.time.DateTimeZone;
 import org.joda.time.LocalDate;
 import org.killbill.billing.account.api.ImmutableAccountData;
 import org.killbill.billing.callcontext.InternalTenantContext;
@@ -49,6 +48,7 @@ import org.killbill.billing.subscription.api.user.SubscriptionBaseBundle;
 import org.killbill.billing.subscription.api.user.SubscriptionBaseTransition;
 
 import com.google.common.base.Function;
+import com.google.common.base.Preconditions;
 import com.google.common.base.Predicate;
 import com.google.common.collect.Collections2;
 import com.google.common.collect.ImmutableList;
@@ -70,9 +70,10 @@ public class DefaultEventsStream implements EventsStream {
     private final List<SubscriptionBase> allSubscriptionsForBundle;
     private final InternalTenantContext internalTenantContext;
     private final DateTime utcNow;
+    private final LocalDate utcToday;
     private final int defaultBillCycleDayLocal;
 
-    private BlockingAggregator blockingAggregator;
+    private BlockingAggregator currentStateBlockingAggregator;
     private List<BlockingState> subscriptionEntitlementStates;
     private LocalDate entitlementEffectiveStartDate;
     private DateTime entitlementEffectiveStartDateTime;
@@ -100,13 +101,9 @@ public class DefaultEventsStream implements EventsStream {
         this.defaultBillCycleDayLocal = defaultBillCycleDayLocal;
         this.internalTenantContext = contextWithValidAccountRecordId;
         this.utcNow = utcNow;
+        this.utcToday = contextWithValidAccountRecordId.toLocalDate(utcNow);
 
         setup();
-    }
-
-    @Override
-    public DateTimeZone getAccountTimeZone() {
-        return account.getTimeZone();
     }
 
     @Override
@@ -171,7 +168,7 @@ public class DefaultEventsStream implements EventsStream {
 
     @Override
     public boolean isBlockChange() {
-        return blockingAggregator.isBlockChange();
+        return currentStateBlockingAggregator.isBlockChange();
     }
 
     public boolean isEntitlementFutureCancelled() {
@@ -200,6 +197,13 @@ public class DefaultEventsStream implements EventsStream {
     @Override
     public boolean isSubscriptionCancelled() {
         return subscription.getState() == EntitlementState.CANCELLED;
+    }
+
+    @Override
+    public boolean isBlockChange(final DateTime effectiveDate) {
+        Preconditions.checkState(effectiveDate != null);
+        final BlockingAggregator aggregator = getBlockingAggregator(effectiveDate);
+        return aggregator.isBlockChange();
     }
 
     @Override
@@ -389,24 +393,32 @@ public class DefaultEventsStream implements EventsStream {
 
     private void setup() {
         computeEntitlementBlockingStates();
-        computeBlockingAggregator();
+        computeCurrentBlockingAggregator();
         computeEntitlementStartEvent();
         computeEntitlementCancelEvent();
         computeStateForEntitlement();
     }
 
-    private void computeBlockingAggregator() {
-
-        final List<BlockingState> currentSubscriptionBlockingStatesForServices = filterCurrentBlockableStatePerService(BlockingStateType.SUBSCRIPTION, subscription.getId());
-        final List<BlockingState> currentBundleBlockingStatesForServices = filterCurrentBlockableStatePerService(BlockingStateType.SUBSCRIPTION_BUNDLE, subscription.getBundleId());
-        final List<BlockingState> currentAccountBlockingStatesForServices = filterCurrentBlockableStatePerService(BlockingStateType.ACCOUNT, account.getId());
-        blockingAggregator = blockingChecker.getBlockedStatus(currentAccountBlockingStatesForServices,
-                                                              currentBundleBlockingStatesForServices,
-                                                              currentSubscriptionBlockingStatesForServices,
-                                                              internalTenantContext);
+    private void computeCurrentBlockingAggregator() {
+        currentStateBlockingAggregator = getBlockingAggregator(null);
     }
 
-    private List<BlockingState> filterCurrentBlockableStatePerService(final BlockingStateType type, final UUID blockableId) {
+    private BlockingAggregator getBlockingAggregator(final DateTime upTo) {
+
+        final List<BlockingState> currentSubscriptionBlockingStatesForServices = filterCurrentBlockableStatePerService(BlockingStateType.SUBSCRIPTION, subscription.getId(), upTo);
+        final List<BlockingState> currentBundleBlockingStatesForServices = filterCurrentBlockableStatePerService(BlockingStateType.SUBSCRIPTION_BUNDLE, subscription.getBundleId(), upTo);
+        final List<BlockingState> currentAccountBlockingStatesForServices = filterCurrentBlockableStatePerService(BlockingStateType.ACCOUNT, account.getId(), upTo);
+        return blockingChecker.getBlockedStatus(currentAccountBlockingStatesForServices,
+                                                currentBundleBlockingStatesForServices,
+                                                currentSubscriptionBlockingStatesForServices, internalTenantContext);
+    }
+
+
+
+    private List<BlockingState> filterCurrentBlockableStatePerService(final BlockingStateType type, final UUID blockableId, @Nullable final DateTime upTo) {
+
+        final DateTime resolvedUpTo = upTo != null ? upTo : utcNow;
+
         final Map<String, BlockingState> currentBlockingStatePerService = new HashMap<String, BlockingState>();
         for (final BlockingState blockingState : blockingStates) {
             if (!blockingState.getBlockedId().equals(blockableId)) {
@@ -415,7 +427,7 @@ public class DefaultEventsStream implements EventsStream {
             if (blockingState.getType() != type) {
                 continue;
             }
-            if (blockingState.getEffectiveDate().isAfter(utcNow)) {
+            if (blockingState.getEffectiveDate().isAfter(resolvedUpTo)) {
                 continue;
             }
 
@@ -462,11 +474,11 @@ public class DefaultEventsStream implements EventsStream {
         if (entitlementEffectiveEndDate != null && entitlementEffectiveEndDate.compareTo(internalTenantContext.toLocalDate(utcNow)) <= 0) {
             entitlementState = EntitlementState.CANCELLED;
         } else {
-            if (entitlementEffectiveStartDate.compareTo(new LocalDate(utcNow, account.getTimeZone())) > 0) {
+            if (entitlementEffectiveStartDate.compareTo(utcToday) > 0) {
                 entitlementState = EntitlementState.PENDING;
             } else {
                 // Gather states across all services and check if one of them is set to 'blockEntitlement'
-                entitlementState = (blockingAggregator != null && blockingAggregator.isBlockEntitlement() ? EntitlementState.BLOCKED : EntitlementState.ACTIVE);
+                entitlementState = (currentStateBlockingAggregator != null && currentStateBlockingAggregator.isBlockEntitlement() ? EntitlementState.BLOCKED : EntitlementState.ACTIVE);
             }
         }
     }

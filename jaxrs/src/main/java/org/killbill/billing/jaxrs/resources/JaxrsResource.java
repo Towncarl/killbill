@@ -18,6 +18,9 @@
 
 package org.killbill.billing.jaxrs.resources;
 
+import javax.ws.rs.DefaultValue;
+import javax.ws.rs.QueryParam;
+
 public interface JaxrsResource {
 
     public static final String API_PREFIX = "";
@@ -92,6 +95,10 @@ public interface JaxrsResource {
     public static final String QUERY_ACCOUNT_TREAT_NULL_AS_RESET = "treatNullAsReset";
 
     public static final String QUERY_ACCOUNT_ID = "accountId";
+
+    public static final String QUERY_CANCEL_ALL_SUBSCRIPTIONS = "cancelAllSubscriptions";
+    public static final String QUERY_WRITE_OFF_UNPAID_INVOICES = "writeOffUnpaidInvoices";
+    public static final String QUERY_ITEM_ADJUST_UNPAID_INVOICES = "itemAdjustUnpaidInvoices";
 
     public static final String QUERY_BLOCKING_STATE_TYPES = "blockingStateTypes";
     public static final String QUERY_BLOCKING_STATE_SVCS = "blockingStateSvcs";
@@ -214,6 +221,7 @@ public interface JaxrsResource {
     public static final String TAGS = "tags";
     public static final String TAGS_PATH = PREFIX + "/" + TAGS;
 
+    public static final String ALL_CUSTOM_FIELDS = "allCustomFields";
     public static final String CUSTOM_FIELDS = "customFields";
     public static final String CUSTOM_FIELDS_PATH = PREFIX + "/" + CUSTOM_FIELDS;
 
@@ -278,6 +286,7 @@ public interface JaxrsResource {
     public static final String TRANSFER_CREDIT = "transferCredit";
 
     public static final String CACHE = "cache";
+    public static final String HEALTHCHECK = "healthcheck";
 
     public static final String QUERY_INCLUDED_DELETED = "includedDeleted";
 

@@ -46,7 +46,7 @@ import org.testng.annotations.Test;
 import com.google.common.collect.ImmutableList;
 import com.google.common.eventbus.Subscribe;
 
-import static com.jayway.awaitility.Awaitility.await;
+import static org.awaitility.Awaitility.await;
 import static java.util.concurrent.TimeUnit.SECONDS;
 import static org.killbill.billing.account.AccountTestUtils.createAccountData;
 import static org.killbill.billing.account.AccountTestUtils.createTestAccount;
@@ -350,12 +350,10 @@ public class TestDefaultAccountUserApi extends AccountTestSuiteWithEmbeddedDB {
     @Test(groups = "slow", description = "Test Account create Child with a non existing Parent",
             expectedExceptions = AccountApiException.class, expectedExceptionsMessageRegExp = "Account does not exist for id .*")
     public void testCreateChildAccountWithInvalidParent() throws Exception {
-
         final AccountModelDao childAccountModel = createTestAccount();
         childAccountModel.setParentAccountId(UUID.randomUUID());
         final AccountData childAccountData = new DefaultAccount(childAccountModel);
         final Account childAccount = accountUserApi.createAccount(childAccountData, callContext);
-
     }
 
     @Test(groups = "slow", description = "Test un- and re-parenting")

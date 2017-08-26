@@ -1,7 +1,7 @@
 /*
  * Copyright 2010-2013 Ning, Inc.
- * Copyright 2014-2015 Groupon, Inc
- * Copyright 2014-2015 The Billing Project, LLC
+ * Copyright 2014-2017 Groupon, Inc
+ * Copyright 2014-2017 The Billing Project, LLC
  *
  * The Billing Project licenses this file to you under the Apache License, version 2.0
  * (the "License"); you may not use this file except in compliance with the
@@ -29,9 +29,7 @@ import java.util.UUID;
 import javax.annotation.Nullable;
 
 import org.joda.time.DateTime;
-import org.joda.time.DateTimeZone;
 import org.joda.time.LocalDate;
-import org.killbill.billing.callcontext.InternalCallContext;
 import org.killbill.billing.callcontext.InternalTenantContext;
 import org.killbill.billing.catalog.api.BillingActionPolicy;
 import org.killbill.billing.catalog.api.BillingAlignment;
@@ -166,9 +164,7 @@ public class DefaultSubscriptionBase extends EntityBase implements SubscriptionB
         }
 
         final SubscriptionBaseTransition pendingTransition = getPendingTransition();
-        if (pendingTransition != null &&
-            (pendingTransition.getTransitionType().equals(SubscriptionBaseTransitionType.CREATE) ||
-             pendingTransition.getTransitionType().equals(SubscriptionBaseTransitionType.TRANSFER))) {
+        if (pendingTransition != null) {
             return EntitlementState.PENDING;
         }
         throw new IllegalStateException("Should return a valid EntitlementState");
@@ -197,6 +193,15 @@ public class DefaultSubscriptionBase extends EntityBase implements SubscriptionB
         return (getPreviousTransition() == null) ? null
                                                  : getPreviousTransition().getNextPhase();
     }
+
+    public PlanPhase getCurrentOrPendingPhase() {
+        if (getState() == EntitlementState.PENDING) {
+            return getPendingTransition().getNextPhase();
+        } else {
+            return getCurrentPhase();
+        }
+    }
+
 
     @Override
     public Plan getCurrentPlan() {
@@ -257,8 +262,8 @@ public class DefaultSubscriptionBase extends EntityBase implements SubscriptionB
     }
 
     @Override
-    public boolean cancelWithPolicy(final BillingActionPolicy policy, final DateTimeZone accountTimeZone, int accountBillCycleDayLocal, final CallContext context) throws SubscriptionBaseApiException {
-        return apiService.cancelWithPolicy(this, policy, accountTimeZone, accountBillCycleDayLocal, context);
+    public boolean cancelWithPolicy(final BillingActionPolicy policy, int accountBillCycleDayLocal, final CallContext context) throws SubscriptionBaseApiException {
+        return apiService.cancelWithPolicy(this, policy, accountBillCycleDayLocal, context);
     }
 
     @Override
@@ -293,6 +298,7 @@ public class DefaultSubscriptionBase extends EntityBase implements SubscriptionB
         final SubscriptionBaseTransitionDataIterator it = new SubscriptionBaseTransitionDataIterator(
                 clock, transitions, Order.ASC_FROM_PAST,
                 Visibility.ALL, TimeLimit.FUTURE_ONLY);
+
         return it.hasNext() ? it.next() : null;
     }
 
@@ -301,6 +307,9 @@ public class DefaultSubscriptionBase extends EntityBase implements SubscriptionB
         if (getState() == EntitlementState.CANCELLED) {
             final SubscriptionBaseTransition data = getPreviousTransition();
             return data.getPreviousPlan().getProduct();
+        } else if (getState() == EntitlementState.PENDING) {
+            final SubscriptionBaseTransition data = getPendingTransition();
+            return data.getNextPlan().getProduct();
         } else {
             final Plan currentPlan = getCurrentPlan();
             // currentPlan can be null when playing with the clock (subscription created in the future)
@@ -313,6 +322,9 @@ public class DefaultSubscriptionBase extends EntityBase implements SubscriptionB
         if (getState() == EntitlementState.CANCELLED) {
             final SubscriptionBaseTransition data = getPreviousTransition();
             return data.getPreviousPriceList();
+        } else if (getState() == EntitlementState.PENDING) {
+            final SubscriptionBaseTransition data = getPendingTransition();
+            return data.getNextPriceList();
         } else {
             return getCurrentPriceList();
         }
@@ -323,6 +335,9 @@ public class DefaultSubscriptionBase extends EntityBase implements SubscriptionB
         if (getState() == EntitlementState.CANCELLED) {
             final SubscriptionBaseTransition data = getPreviousTransition();
             return data.getPreviousPlan().getProduct().getCategory();
+        } else if (getState() == EntitlementState.PENDING) {
+            final SubscriptionBaseTransition data = getPendingTransition();
+            return data.getNextPlan().getProduct().getCategory();
         } else {
             final Plan currentPlan = getCurrentPlan();
             // currentPlan can be null when playing with the clock (subscription created in the future)
@@ -335,6 +350,9 @@ public class DefaultSubscriptionBase extends EntityBase implements SubscriptionB
         if (getState() == EntitlementState.CANCELLED) {
             final SubscriptionBaseTransition data = getPreviousTransition();
             return data.getPreviousPlan();
+        } else if (getState() == EntitlementState.PENDING) {
+            final SubscriptionBaseTransition data = getPendingTransition();
+            return data.getNextPlan();
         } else {
             return getCurrentPlan();
         }
@@ -345,6 +363,9 @@ public class DefaultSubscriptionBase extends EntityBase implements SubscriptionB
         if (getState() == EntitlementState.CANCELLED) {
             final SubscriptionBaseTransition data = getPreviousTransition();
             return data.getPreviousPhase();
+        } else if (getState() == EntitlementState.PENDING) {
+            final SubscriptionBaseTransition data = getPendingTransition();
+            return data.getNextPhase();
         } else {
             return getCurrentPhase();
         }
@@ -355,6 +376,9 @@ public class DefaultSubscriptionBase extends EntityBase implements SubscriptionB
         if (getState() == EntitlementState.CANCELLED) {
             final SubscriptionBaseTransition data = getPreviousTransition();
             return data.getPreviousPlan().getRecurringBillingPeriod();
+        } else if (getState() == EntitlementState.PENDING) {
+            final SubscriptionBaseTransition data = getPendingTransition();
+            return data.getNextPlan().getRecurringBillingPeriod();
         } else {
             final Plan currentPlan = getCurrentPlan();
             // currentPlan can be null when playing with the clock (subscription created in the future)
@@ -548,7 +572,7 @@ public class DefaultSubscriptionBase extends EntityBase implements SubscriptionB
         return getFutureEndDate() != null;
     }
 
-    public DateTime getPlanChangeEffectiveDate(final BillingActionPolicy policy, @Nullable final BillingAlignment alignment, @Nullable final DateTimeZone accountTimeZone, @Nullable final Integer accountBillCycleDayLocal, final InternalTenantContext context) {
+    public DateTime getPlanChangeEffectiveDate(final BillingActionPolicy policy, @Nullable final BillingAlignment alignment, @Nullable final Integer accountBillCycleDayLocal, final InternalTenantContext context) {
 
         final DateTime candidateResult;
         switch (policy) {
@@ -564,7 +588,7 @@ public class DefaultSubscriptionBase extends EntityBase implements SubscriptionB
                 } else {
 
                     // In certain path (dryRun, or default catalog START_OF_TERM policy), the info is not easily available and as a result, such policy is not implemented
-                    Preconditions.checkState(alignment != null && accountTimeZone != null && accountBillCycleDayLocal != null, "START_OF_TERM not implemented in dryRun use case");
+                    Preconditions.checkState(alignment != null && context != null && accountBillCycleDayLocal != null, "START_OF_TERM not implemented in dryRun use case");
 
                     Preconditions.checkState(alignment != BillingAlignment.BUNDLE || category != ProductCategory.ADD_ON,  "START_OF_TERM not implemented for AO configured with a BUNDLE billing alignment");
 
@@ -572,7 +596,7 @@ public class DefaultSubscriptionBase extends EntityBase implements SubscriptionB
                     // alignment purpose
                     Integer bcd = getBillCycleDayLocal();
                     if (bcd == null) {
-                        bcd = BillCycleDayCalculator.calculateBcdForAlignment(null, this, this, alignment, accountTimeZone, accountBillCycleDayLocal);
+                        bcd = BillCycleDayCalculator.calculateBcdForAlignment(null, this, this, alignment, context, accountBillCycleDayLocal);
                     }
 
                     final BillingPeriod billingPeriod = getLastActivePlan().getRecurringBillingPeriod();
@@ -581,7 +605,7 @@ public class DefaultSubscriptionBase extends EntityBase implements SubscriptionB
                         proposedDate = proposedDate.minus(billingPeriod.getPeriod());
                     }
 
-                    final LocalDate resultingLocalDate  = BillCycleDayCalculator.alignProposedBillCycleDate(proposedDate, bcd, billingPeriod, accountTimeZone);
+                    final LocalDate resultingLocalDate  = BillCycleDayCalculator.alignProposedBillCycleDate(proposedDate, bcd, billingPeriod, context);
                     candidateResult = context.toUTCDateTime(resultingLocalDate);
                 }
 
