@@ -1,7 +1,7 @@
 /*
  * Copyright 2010-2013 Ning, Inc.
- * Copyright 2014-2016 Groupon, Inc
- * Copyright 2014-2016 The Billing Project, LLC
+ * Copyright 2014-2018 Groupon, Inc
+ * Copyright 2014-2018 The Billing Project, LLC
  *
  * The Billing Project licenses this file to you under the Apache License, version 2.0
  * (the "License"); you may not use this file except in compliance with the
@@ -91,6 +91,7 @@ public class DefaultEventsStream implements EventsStream {
                                final List<SubscriptionBase> allSubscriptionsForBundle,
                                final int defaultBillCycleDayLocal,
                                final InternalTenantContext contextWithValidAccountRecordId, final DateTime utcNow) {
+        sanityChecks(account, bundle, baseSubscription, subscription);
         this.account = account;
         this.bundle = bundle;
         this.blockingStates = blockingStates;
@@ -104,6 +105,21 @@ public class DefaultEventsStream implements EventsStream {
         this.utcToday = contextWithValidAccountRecordId.toLocalDate(utcNow);
 
         setup();
+    }
+
+    private void sanityChecks(@Nullable final ImmutableAccountData account,
+                              @Nullable final SubscriptionBaseBundle bundle,
+                              @Nullable final SubscriptionBase baseSubscription,
+                              @Nullable final SubscriptionBase subscription) {
+        // baseSubscription can be null for STANDALONE products (https://github.com/killbill/killbill/issues/840)
+        for (final Object object : new Object[]{account, bundle, subscription}) {
+            Preconditions.checkNotNull(object,
+                                       "accountId='%s', bundleId='%s', baseSubscriptionId='%s', subscriptionId='%s'",
+                                       account != null ? account.getId() : null,
+                                       bundle != null ? bundle.getId() : null,
+                                       baseSubscription != null ? baseSubscription.getId() : null,
+                                       subscription != null ? subscription.getId() : null);
+        }
     }
 
     @Override
