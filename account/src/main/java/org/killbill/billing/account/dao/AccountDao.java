@@ -1,7 +1,9 @@
 /*
  * Copyright 2010-2013 Ning, Inc.
+ * Copyright 2014-2018 Groupon, Inc
+ * Copyright 2014-2018 The Billing Project, LLC
  *
- * Ning licenses this file to you under the Apache License, version 2.0
+ * The Billing Project licenses this file to you under the Apache License, version 2.0
  * (the "License"); you may not use this file except in compliance with the
  * License.  You may obtain a copy of the License at:
  *
@@ -23,6 +25,8 @@ import org.killbill.billing.account.api.Account;
 import org.killbill.billing.account.api.AccountApiException;
 import org.killbill.billing.callcontext.InternalCallContext;
 import org.killbill.billing.callcontext.InternalTenantContext;
+import org.killbill.billing.util.api.AuditLevel;
+import org.killbill.billing.util.audit.AuditLogWithHistory;
 import org.killbill.billing.util.entity.Pagination;
 import org.killbill.billing.util.entity.dao.EntityDao;
 
@@ -43,7 +47,7 @@ public interface AccountDao extends EntityDao<AccountModelDao, Account, AccountA
      */
     void updatePaymentMethod(UUID accountId, UUID paymentMethodId, InternalCallContext context) throws AccountApiException;
 
-    void update(AccountModelDao account, InternalCallContext context) throws AccountApiException;
+    void update(AccountModelDao account, boolean treatNullValueAsReset, InternalCallContext context) throws AccountApiException;
 
     void addEmail(AccountEmailModelDao email, InternalCallContext context) throws AccountApiException;
 
@@ -54,4 +58,8 @@ public interface AccountDao extends EntityDao<AccountModelDao, Account, AccountA
     Integer getAccountBCD(UUID accountId, InternalTenantContext context);
 
     List<AccountModelDao> getAccountsByParentId(UUID parentAccountId, InternalTenantContext context);
+
+    List<AuditLogWithHistory> getAuditLogsWithHistoryForId(UUID accountId, AuditLevel auditLevel, InternalTenantContext context) throws AccountApiException;
+
+    List<AuditLogWithHistory> getEmailAuditLogsWithHistoryForId(UUID accountEmailId, AuditLevel auditLevel, InternalTenantContext context) throws AccountApiException;
 }

@@ -1,7 +1,7 @@
 /*
  * Copyright 2010-2013 Ning, Inc.
- * Copyright 2014-2017 Groupon, Inc
- * Copyright 2014-2017 The Billing Project, LLC
+ * Copyright 2014-2018 Groupon, Inc
+ * Copyright 2014-2018 The Billing Project, LLC
  *
  * The Billing Project licenses this file to you under the Apache License, version 2.0
  * (the "License"); you may not use this file except in compliance with the
@@ -26,7 +26,6 @@ import org.joda.time.DateTimeZone;
 import org.killbill.billing.ErrorCode;
 import org.killbill.billing.ObjectType;
 import org.killbill.billing.account.AccountTestSuiteWithEmbeddedDB;
-import org.killbill.billing.account.api.Account;
 import org.killbill.billing.account.api.AccountApiException;
 import org.killbill.billing.account.api.AccountData;
 import org.killbill.billing.account.api.AccountEmail;
@@ -40,10 +39,10 @@ import org.killbill.billing.util.api.CustomFieldApiException;
 import org.killbill.billing.util.api.TagApiException;
 import org.killbill.billing.util.api.TagDefinitionApiException;
 import org.killbill.billing.util.audit.AuditLog;
+import org.killbill.billing.util.audit.AuditLogWithHistory;
 import org.killbill.billing.util.audit.ChangeType;
 import org.killbill.billing.util.audit.DefaultAccountAuditLogs;
 import org.killbill.billing.util.customfield.dao.CustomFieldModelDao;
-import org.killbill.billing.util.dao.EntityHistoryModelDao;
 import org.killbill.billing.util.dao.TableName;
 import org.killbill.billing.util.entity.Pagination;
 import org.killbill.billing.util.tag.DescriptiveTag;
@@ -65,9 +64,9 @@ public class TestAccountDao extends AccountTestSuiteWithEmbeddedDB {
         final String email = UUID.randomUUID().toString();
         final String name = UUID.randomUUID().toString();
         final AccountData accountData = new DefaultMutableAccountData(null, email, name, 0, null, null, false,
-                                                                      0, null, null, null, null,
+                                                                      0, null, clock.getUTCNow(), null, null, null,
                                                                       null, null, null, null, null,
-                                                                      null, null, null, false, true);
+                                                                      null, null, null, false);
         final AccountModelDao account = new AccountModelDao(UUID.randomUUID(), accountData);
         accountDao.create(account, internalCallContext);
 
@@ -85,6 +84,7 @@ public class TestAccountDao extends AccountTestSuiteWithEmbeddedDB {
     public void testBasic() throws AccountApiException {
         final AccountModelDao account = createTestAccount();
         accountDao.create(account, internalCallContext);
+        refreshCallContext(account.getId());
 
         // Retrieve by key
         AccountModelDao retrievedAccount = accountDao.getAccountByKey(account.getExternalKey(), internalCallContext);
@@ -144,6 +144,7 @@ public class TestAccountDao extends AccountTestSuiteWithEmbeddedDB {
     public void testLongPhoneNumber() throws AccountApiException {
         final AccountModelDao account = createTestAccount("123456789012345678901234");
         accountDao.create(account, internalCallContext);
+        refreshCallContext(account.getId());
 
         final AccountModelDao retrievedAccount = accountDao.getAccountByKey(account.getExternalKey(), internalCallContext);
         checkAccountsEqual(retrievedAccount, account);
@@ -184,7 +185,7 @@ public class TestAccountDao extends AccountTestSuiteWithEmbeddedDB {
     @Test(groups = "slow", description = "Test Account DAO: tags")
     public void testTags() throws TagApiException, TagDefinitionApiException {
         final AccountModelDao account = createTestAccount();
-        final TagDefinitionModelDao tagDefinition = tagDefinitionDao.create(UUID.randomUUID().toString().substring(0, 4), UUID.randomUUID().toString(), internalCallContext);
+        final TagDefinitionModelDao tagDefinition = tagDefinitionDao.create(UUID.randomUUID().toString().substring(0, 4), UUID.randomUUID().toString(), ObjectType.ACCOUNT.name(), internalCallContext);
         final Tag tag = new DescriptiveTag(tagDefinition.getId(), ObjectType.ACCOUNT, account.getId(), internalCallContext.getCreatedDate());
         tagDao.create(new TagModelDao(tag), internalCallContext);
 
@@ -199,6 +200,7 @@ public class TestAccountDao extends AccountTestSuiteWithEmbeddedDB {
     public void testGetIdFromKey() throws AccountApiException {
         final AccountModelDao account = createTestAccount();
         accountDao.create(account, internalCallContext);
+        refreshCallContext(account.getId());
 
         final UUID accountId = accountDao.getIdFromKey(account.getExternalKey(), internalCallContext);
         Assert.assertEquals(accountId, account.getId());
@@ -213,69 +215,69 @@ public class TestAccountDao extends AccountTestSuiteWithEmbeddedDB {
     public void testUpdate() throws Exception {
         final AccountModelDao account = createTestAccount();
         accountDao.create(account, internalCallContext);
-        final AccountModelDao createdAccount = accountDao.getAccountByKey(account.getExternalKey(), internalCallContext);
+        refreshCallContext(account.getId());
 
-        final List<EntityHistoryModelDao<AccountModelDao, Account>> history1 = getAccountHistory(createdAccount.getRecordId());
-        Assert.assertEquals(history1.size(), 1);
-        Assert.assertEquals(history1.get(0).getChangeType(), ChangeType.INSERT);
-        Assert.assertEquals(history1.get(0).getEntity().getAccountRecordId(), createdAccount.getRecordId());
-        Assert.assertEquals(history1.get(0).getEntity().getTenantRecordId(), createdAccount.getTenantRecordId());
-        Assert.assertEquals(history1.get(0).getEntity().getExternalKey(), createdAccount.getExternalKey());
-        Assert.assertEquals(history1.get(0).getEntity().getMigrated(), createdAccount.getMigrated());
-        Assert.assertEquals(history1.get(0).getEntity().getIsNotifiedForInvoices(), createdAccount.getIsNotifiedForInvoices());
-        Assert.assertEquals(history1.get(0).getEntity().getTimeZone(), createdAccount.getTimeZone());
-        Assert.assertEquals(history1.get(0).getEntity().getLocale(), createdAccount.getLocale());
+        final AccountModelDao createdAccount = accountDao.getAccountByKey(account.getExternalKey(), internalCallContext);
+        List<AuditLogWithHistory> auditLogsWithHistory = accountDao.getAuditLogsWithHistoryForId(account.getId(), AuditLevel.FULL, internalCallContext);
+        Assert.assertEquals(auditLogsWithHistory.size(), 1);
+
+        final AccountModelDao history1 = (AccountModelDao) auditLogsWithHistory.get(0).getEntity();
+        Assert.assertEquals(auditLogsWithHistory.get(0).getChangeType(), ChangeType.INSERT);
+        Assert.assertEquals(history1.getAccountRecordId(), createdAccount.getRecordId());
+        Assert.assertEquals(history1.getTenantRecordId(), createdAccount.getTenantRecordId());
+        Assert.assertEquals(history1.getExternalKey(), createdAccount.getExternalKey());
+        Assert.assertEquals(history1.getMigrated(), createdAccount.getMigrated());
+        Assert.assertEquals(history1.getTimeZone(), createdAccount.getTimeZone());
+        Assert.assertEquals(history1.getLocale(), createdAccount.getLocale());
 
         final AccountData accountData = new MockAccountBuilder(new DefaultAccount(account)).migrated(false)
-                                                                                           .isNotifiedForInvoices(false)
-                                                                                           .timeZone(DateTimeZone.forID("Australia/Darwin"))
                                                                                            .locale("FR-CA")
                                                                                            .build();
         final AccountModelDao updatedAccount = new AccountModelDao(account.getId(), accountData);
-        accountDao.update(updatedAccount, internalCallContext);
+        accountDao.update(updatedAccount, true, internalCallContext);
 
         final AccountModelDao retrievedAccount = accountDao.getAccountByKey(account.getExternalKey(), internalCallContext);
         checkAccountsEqual(retrievedAccount, updatedAccount);
+        auditLogsWithHistory = accountDao.getAuditLogsWithHistoryForId(retrievedAccount.getId(), AuditLevel.FULL, internalCallContext);
+        Assert.assertEquals(auditLogsWithHistory.size(), 2);
 
-        final List<EntityHistoryModelDao<AccountModelDao, Account>> history2 = getAccountHistory(createdAccount.getRecordId());
-        Assert.assertEquals(history2.size(), 2);
-        Assert.assertEquals(history2.get(0).getChangeType(), ChangeType.INSERT);
-        Assert.assertEquals(history2.get(1).getChangeType(), ChangeType.UPDATE);
-        Assert.assertEquals(history2.get(1).getEntity().getAccountRecordId(), retrievedAccount.getRecordId());
-        Assert.assertEquals(history2.get(1).getEntity().getTenantRecordId(), retrievedAccount.getTenantRecordId());
-        Assert.assertEquals(history2.get(1).getEntity().getExternalKey(), retrievedAccount.getExternalKey());
-        Assert.assertEquals(history2.get(1).getEntity().getMigrated(), retrievedAccount.getMigrated());
-        Assert.assertEquals(history2.get(1).getEntity().getIsNotifiedForInvoices(), retrievedAccount.getIsNotifiedForInvoices());
-        Assert.assertEquals(history2.get(1).getEntity().getTimeZone(), retrievedAccount.getTimeZone());
-        Assert.assertEquals(history2.get(1).getEntity().getLocale(), retrievedAccount.getLocale());
+        final AccountModelDao history2 = (AccountModelDao) auditLogsWithHistory.get(1).getEntity();
+        Assert.assertEquals(auditLogsWithHistory.get(0).getChangeType(), ChangeType.INSERT);
+        Assert.assertEquals(auditLogsWithHistory.get(1).getChangeType(), ChangeType.UPDATE);
+        Assert.assertEquals(history2.getAccountRecordId(), retrievedAccount.getRecordId());
+        Assert.assertEquals(history2.getTenantRecordId(), retrievedAccount.getTenantRecordId());
+        Assert.assertEquals(history2.getExternalKey(), retrievedAccount.getExternalKey());
+        Assert.assertEquals(history2.getMigrated(), retrievedAccount.getMigrated());
+        Assert.assertEquals(history2.getTimeZone(), retrievedAccount.getTimeZone());
+        Assert.assertEquals(history2.getLocale(), retrievedAccount.getLocale());
 
-        final AccountData accountData2 = new MockAccountBuilder(new DefaultAccount(updatedAccount)).isNotifiedForInvoices(true)
-                                                                                                   .locale("en_US")
+        final AccountData accountData2 = new MockAccountBuilder(new DefaultAccount(updatedAccount)).locale("en_US")
                                                                                                    .build();
         final AccountModelDao updatedAccount2 = new AccountModelDao(account.getId(), accountData2);
-        accountDao.update(updatedAccount2, internalCallContext);
+        accountDao.update(updatedAccount2, true, internalCallContext);
 
         final AccountModelDao retrievedAccount2 = accountDao.getAccountByKey(account.getExternalKey(), internalCallContext);
         checkAccountsEqual(retrievedAccount2, updatedAccount2);
+        auditLogsWithHistory = accountDao.getAuditLogsWithHistoryForId(retrievedAccount2.getId(), AuditLevel.FULL, internalCallContext);
+        Assert.assertEquals(auditLogsWithHistory.size(), 3);
 
-        final List<EntityHistoryModelDao<AccountModelDao, Account>> history3 = getAccountHistory(createdAccount.getRecordId());
-        Assert.assertEquals(history3.size(), 3);
-        Assert.assertEquals(history3.get(0).getChangeType(), ChangeType.INSERT);
-        Assert.assertEquals(history3.get(1).getChangeType(), ChangeType.UPDATE);
-        Assert.assertEquals(history3.get(2).getChangeType(), ChangeType.UPDATE);
-        Assert.assertEquals(history3.get(2).getEntity().getAccountRecordId(), retrievedAccount2.getRecordId());
-        Assert.assertEquals(history3.get(2).getEntity().getTenantRecordId(), retrievedAccount2.getTenantRecordId());
-        Assert.assertEquals(history3.get(2).getEntity().getExternalKey(), retrievedAccount2.getExternalKey());
-        Assert.assertEquals(history3.get(2).getEntity().getMigrated(), retrievedAccount2.getMigrated());
-        Assert.assertEquals(history3.get(2).getEntity().getIsNotifiedForInvoices(), retrievedAccount2.getIsNotifiedForInvoices());
-        Assert.assertEquals(history3.get(2).getEntity().getTimeZone(), retrievedAccount2.getTimeZone());
-        Assert.assertEquals(history3.get(2).getEntity().getLocale(), retrievedAccount2.getLocale());
+        final AccountModelDao history3 = (AccountModelDao) auditLogsWithHistory.get(2).getEntity();
+        Assert.assertEquals(auditLogsWithHistory.get(0).getChangeType(), ChangeType.INSERT);
+        Assert.assertEquals(auditLogsWithHistory.get(1).getChangeType(), ChangeType.UPDATE);
+        Assert.assertEquals(auditLogsWithHistory.get(2).getChangeType(), ChangeType.UPDATE);
+        Assert.assertEquals(history3.getAccountRecordId(), retrievedAccount2.getRecordId());
+        Assert.assertEquals(history3.getTenantRecordId(), retrievedAccount2.getTenantRecordId());
+        Assert.assertEquals(history3.getExternalKey(), retrievedAccount2.getExternalKey());
+        Assert.assertEquals(history3.getMigrated(), retrievedAccount2.getMigrated());
+        Assert.assertEquals(history3.getTimeZone(), retrievedAccount2.getTimeZone());
+        Assert.assertEquals(history3.getLocale(), retrievedAccount2.getLocale());
     }
 
     @Test(groups = "slow", description = "Test Account DAO: payment method update")
     public void testUpdatePaymentMethod() throws Exception {
         final AccountModelDao account = createTestAccount();
         accountDao.create(account, internalCallContext);
+        refreshCallContext(account.getId());
 
         final UUID newPaymentMethodId = UUID.randomUUID();
         accountDao.updatePaymentMethod(account.getId(), newPaymentMethodId, internalCallContext);
@@ -294,12 +296,13 @@ public class TestAccountDao extends AccountTestSuiteWithEmbeddedDB {
     public void testShouldBeAbleToUpdateSomeFields() throws Exception {
         final AccountModelDao account = createTestAccount();
         accountDao.create(account, internalCallContext);
+        refreshCallContext(account.getId());
 
         final MutableAccountData otherAccount = new DefaultAccount(account).toMutableAccountData();
         otherAccount.setAddress1(UUID.randomUUID().toString());
         otherAccount.setEmail(UUID.randomUUID().toString());
         final AccountModelDao newAccount = new AccountModelDao(account.getId(), otherAccount);
-        accountDao.update(newAccount, internalCallContext);
+        accountDao.update(newAccount, true, internalCallContext);
 
         final AccountModelDao retrievedAccount = accountDao.getById(account.getId(), internalCallContext);
         checkAccountsEqual(retrievedAccount, newAccount);
@@ -309,6 +312,7 @@ public class TestAccountDao extends AccountTestSuiteWithEmbeddedDB {
     public void testShouldBeAbleToHandleBCDOfZero() throws Exception {
         final AccountModelDao account = createTestAccount(0);
         accountDao.create(account, internalCallContext);
+        refreshCallContext(account.getId());
 
         // Same BCD (zero)
         final AccountModelDao retrievedAccount = accountDao.getById(account.getId(), internalCallContext);
@@ -398,11 +402,5 @@ public class TestAccountDao extends AccountTestSuiteWithEmbeddedDB {
         final List<AuditLog> auditLogsForAccountEmail2 = auditDao.getAuditLogsForId(TableName.ACCOUNT_EMAIL, accountEmail2.getId(), AuditLevel.FULL, internalCallContext);
         Assert.assertEquals(auditLogsForAccountEmail2.size(), 1);
         Assert.assertEquals(auditLogsForAccountEmail2.get(0).getChangeType(), ChangeType.INSERT);
-    }
-
-    private List<EntityHistoryModelDao<AccountModelDao, Account>> getAccountHistory(final Long accountRecordId) {
-        // See https://github.com/killbill/killbill/issues/335
-        final AccountSqlDao accountSqlDao = dbi.onDemand(AccountSqlDao.class);
-        return accountSqlDao.getHistoryForTargetRecordId(accountRecordId, internalCallContext);
     }
 }

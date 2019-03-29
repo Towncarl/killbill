@@ -1,7 +1,9 @@
 /*
- * Copyright 2010-2011 Ning, Inc.
+ * Copyright 2010-2013 Ning, Inc.
+ * Copyright 2014-2018 Groupon, Inc
+ * Copyright 2014-2018 The Billing Project, LLC
  *
- * Ning licenses this file to you under the Apache License, version 2.0
+ * The Billing Project licenses this file to you under the Apache License, version 2.0
  * (the "License"); you may not use this file except in compliance with the
  * License.  You may obtain a copy of the License at:
  *
@@ -16,7 +18,10 @@
 
 package org.killbill.billing.catalog;
 
-import java.net.URI;
+import java.io.Externalizable;
+import java.io.IOException;
+import java.io.ObjectInput;
+import java.io.ObjectOutput;
 
 import javax.xml.bind.annotation.XmlAccessType;
 import javax.xml.bind.annotation.XmlAccessorType;
@@ -28,18 +33,23 @@ import org.killbill.xmlloader.ValidatingConfig;
 import org.killbill.xmlloader.ValidationErrors;
 
 @XmlAccessorType(XmlAccessType.NONE)
-public class DefaultUnit extends ValidatingConfig<StandaloneCatalog> implements Unit {
-    
+public class DefaultUnit extends ValidatingConfig<StandaloneCatalog> implements Unit, Externalizable {
+
     @XmlAttribute(required = true)
     @XmlID
     private String name;
 
-    /* (non-Javadoc)
-     * @see org.killbill.billing.catalog.Unit#getName()
-     */
+    @XmlAttribute(required = false)
+    private String prettyName;
+
     @Override
     public String getName() {
         return name;
+    }
+
+    @Override
+    public String getPrettyName() {
+        return prettyName;
     }
 
     @Override
@@ -47,16 +57,26 @@ public class DefaultUnit extends ValidatingConfig<StandaloneCatalog> implements 
         return errors;
     }
 
-
-    @Override
-    public void initialize(final StandaloneCatalog catalog, final URI sourceURI) {
-        super.initialize(catalog, sourceURI);
-        CatalogSafetyInitializer.initializeNonRequiredNullFieldsWithDefaultValue(this);
+    // Required for deserialization
+    public DefaultUnit() {
     }
 
+    @Override
+    public void initialize(final StandaloneCatalog catalog) {
+        super.initialize(catalog);
+        CatalogSafetyInitializer.initializeNonRequiredNullFieldsWithDefaultValue(this);
+        if (prettyName == null) {
+            this.prettyName = name;
+        }
+    }
 
     public DefaultUnit setName(final String name) {
         this.name = name;
+        return this;
+    }
+
+    public DefaultUnit setPrettyName(final String prettyName) {
+        this.prettyName = prettyName;
         return this;
     }
 
@@ -81,5 +101,20 @@ public class DefaultUnit extends ValidatingConfig<StandaloneCatalog> implements 
     @Override
     public int hashCode() {
         return name != null ? name.hashCode() : 0;
+    }
+
+    @Override
+    public void writeExternal(final ObjectOutput out) throws IOException {
+        out.writeUTF(name);
+        out.writeBoolean(prettyName != null);
+        if (prettyName != null) {
+            out.writeUTF(prettyName);
+        }
+    }
+
+    @Override
+    public void readExternal(final ObjectInput in) throws IOException, ClassNotFoundException {
+        this.name = in.readUTF();
+        this.prettyName = in.readBoolean() ? in.readUTF() : null;
     }
 }

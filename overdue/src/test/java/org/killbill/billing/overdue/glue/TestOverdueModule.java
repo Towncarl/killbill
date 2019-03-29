@@ -23,6 +23,7 @@ import java.util.UUID;
 
 import org.killbill.billing.callcontext.InternalCallContext;
 import org.killbill.billing.callcontext.InternalTenantContext;
+import org.killbill.billing.catalog.api.Catalog;
 import org.killbill.billing.entitlement.api.BlockingState;
 import org.killbill.billing.entitlement.api.BlockingStateType;
 import org.killbill.billing.junction.BlockingInternalApi;
@@ -40,14 +41,12 @@ import org.killbill.billing.overdue.caching.OverdueConfigCache;
 import org.killbill.billing.overdue.wrapper.OverdueWrapper;
 import org.killbill.billing.platform.api.KillbillConfigSource;
 import org.killbill.billing.tenant.api.TenantInternalApi.CacheInvalidationCallback;
-import org.killbill.billing.util.email.EmailModule;
 import org.killbill.billing.util.email.templates.TemplateModule;
 import org.killbill.billing.util.glue.AuditModule;
 import org.killbill.billing.util.glue.CacheModule;
 import org.killbill.billing.util.glue.CallContextModule;
 import org.killbill.billing.util.glue.ConfigModule;
 import org.killbill.billing.util.glue.CustomFieldModule;
-import org.killbill.billing.util.glue.MemoryGlobalLockerModule;
 
 import com.google.inject.name.Names;
 
@@ -66,14 +65,12 @@ public class TestOverdueModule extends DefaultOverdueModule {
         install(new ConfigModule(configSource));
         install(new CallContextModule(configSource));
         install(new CustomFieldModule(configSource));
-        install(new EmailModule(configSource));
         install(new MockAccountModule(configSource));
         install(new MockEntitlementModule(configSource, new ApplicatorBlockingApi()));
         install(new MockInvoiceModule(configSource));
         install(new MockTagModule(configSource, true));
         install(new TemplateModule(configSource));
         install(new MockTenantModule(configSource));
-        install(new MemoryGlobalLockerModule(configSource));
 
         bind(OverdueBusListenerTester.class).asEagerSingleton();
         bind(TestOverdueHelper.class).asEagerSingleton();
@@ -92,7 +89,6 @@ public class TestOverdueModule extends DefaultOverdueModule {
             return blockingState;
         }
 
-
         @Override
         public BlockingState getBlockingStateForService(final UUID blockableId, final BlockingStateType blockingStateType, final String serviceName, final InternalTenantContext context) {
             if (blockingState != null && blockingState.getBlockedId().equals(blockableId)) {
@@ -103,7 +99,7 @@ public class TestOverdueModule extends DefaultOverdueModule {
         }
 
         @Override
-        public List<BlockingState> getBlockingAllForAccount(final InternalTenantContext context) {
+        public List<BlockingState> getBlockingAllForAccount(final Catalog catalog, final InternalTenantContext context) {
             throw new UnsupportedOperationException();
         }
 

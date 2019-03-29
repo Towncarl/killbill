@@ -25,6 +25,7 @@ import java.util.UUID;
 
 import javax.annotation.Nullable;
 
+import com.google.common.collect.ImmutableList;
 import org.joda.time.DateTime;
 import org.killbill.billing.account.api.Account;
 import org.killbill.billing.payment.api.PaymentMethod;
@@ -37,23 +38,23 @@ import com.fasterxml.jackson.annotation.JsonIgnore;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import com.google.common.base.Function;
 import com.google.common.collect.Collections2;
+import io.swagger.annotations.ApiModel;
 import io.swagger.annotations.ApiModelProperty;
 
+@ApiModel(value="PaymentMethod", parent = JsonBase.class)
 public class PaymentMethodJson extends JsonBase {
 
     private final String externalKey;
-    @ApiModelProperty(dataType = "java.util.UUID")
-    private final String paymentMethodId;
-    @ApiModelProperty(dataType = "java.util.UUID")
-    private final String accountId;
+    private final UUID paymentMethodId;
+    private final UUID accountId;
     private final Boolean isDefault;
     private final String pluginName;
     private final PaymentMethodPluginDetailJson pluginInfo;
 
     @JsonCreator
-    public PaymentMethodJson(@JsonProperty("paymentMethodId") final String paymentMethodId,
+    public PaymentMethodJson(@JsonProperty("paymentMethodId") final UUID paymentMethodId,
                              @JsonProperty("externalKey") final String externalKey,
-                             @JsonProperty("accountId") final String accountId,
+                             @JsonProperty("accountId") final UUID accountId,
                              @JsonProperty("isDefault") final Boolean isDefault,
                              @JsonProperty("pluginName") final String pluginName,
                              @JsonProperty("pluginInfo") @Nullable final PaymentMethodPluginDetailJson pluginInfo,
@@ -86,11 +87,11 @@ public class PaymentMethodJson extends JsonBase {
                                                                  pluginDetail.isDefaultPaymentMethod(),
                                                                  properties);
         }
-        return new PaymentMethodJson(in.getId().toString(), in.getExternalKey(), account.getId().toString(), isDefault, in.getPluginName(),
+        return new PaymentMethodJson(in.getId(), in.getExternalKey(), account.getId(), isDefault, in.getPluginName(),
                                      pluginDetailJson, toAuditLogJson(accountAuditLogs == null ? null : accountAuditLogs.getAuditLogsForPaymentMethod(in.getId())));
     }
 
-    public PaymentMethod toPaymentMethod(final String accountId) {
+    public PaymentMethod toPaymentMethod(final UUID accountId) {
         return new PaymentMethod() {
             @Override
             public Boolean isActive() {
@@ -104,7 +105,7 @@ public class PaymentMethodJson extends JsonBase {
 
             @Override
             public UUID getId() {
-                return paymentMethodId != null ? UUID.fromString(paymentMethodId) : null;
+                return paymentMethodId;
             }
 
             @Override
@@ -124,7 +125,7 @@ public class PaymentMethodJson extends JsonBase {
 
             @Override
             public UUID getAccountId() {
-                return UUID.fromString(accountId);
+                return accountId;
             }
 
             @Override
@@ -132,7 +133,7 @@ public class PaymentMethodJson extends JsonBase {
                 return new PaymentMethodPlugin() {
                     @Override
                     public UUID getKbPaymentMethodId() {
-                        return paymentMethodId == null ? null : UUID.fromString(paymentMethodId);
+                        return paymentMethodId;
                     }
 
                     @Override
@@ -155,18 +156,18 @@ public class PaymentMethodJson extends JsonBase {
                             }
                             return result;
                         }
-                        return null;
+                        return ImmutableList.of();
                     }
                 };
             }
         };
     }
 
-    public String getPaymentMethodId() {
+    public UUID getPaymentMethodId() {
         return paymentMethodId;
     }
 
-    public String getAccountId() {
+    public UUID getAccountId() {
         return accountId;
     }
 
@@ -240,6 +241,8 @@ public class PaymentMethodJson extends JsonBase {
         return result;
     }
 
+
+    @ApiModel(value="PaymentMethodPluginDetail")
     public static class PaymentMethodPluginDetailJson {
 
         private final String externalPaymentMethodId;

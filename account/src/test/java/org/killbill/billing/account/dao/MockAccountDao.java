@@ -1,7 +1,7 @@
 /*
  * Copyright 2010-2013 Ning, Inc.
- * Copyright 2014-2016 Groupon, Inc
- * Copyright 2014-2016 The Billing Project, LLC
+ * Copyright 2014-2018 Groupon, Inc
+ * Copyright 2014-2018 The Billing Project, LLC
  *
  * The Billing Project licenses this file to you under the Apache License, version 2.0
  * (the "License"); you may not use this file except in compliance with the
@@ -37,6 +37,8 @@ import org.killbill.billing.account.api.user.DefaultAccountCreationEvent.Default
 import org.killbill.billing.callcontext.InternalCallContext;
 import org.killbill.billing.callcontext.InternalTenantContext;
 import org.killbill.billing.events.AccountChangeInternalEvent;
+import org.killbill.billing.util.api.AuditLevel;
+import org.killbill.billing.util.audit.AuditLogWithHistory;
 import org.killbill.billing.util.callcontext.InternalCallContextFactory;
 import org.killbill.billing.util.entity.DefaultPagination;
 import org.killbill.billing.util.entity.Pagination;
@@ -79,7 +81,7 @@ public class MockAccountDao extends MockEntityDaoBase<AccountModelDao, Account, 
     }
 
     @Override
-    public void update(final AccountModelDao account, final InternalCallContext context) {
+    public void update(final AccountModelDao account, final boolean treatNullValueAsReset, final InternalCallContext context) {
         super.update(account, context);
 
         final AccountModelDao currentAccount = getById(account.getId(), context);
@@ -185,5 +187,15 @@ public class MockAccountDao extends MockEntityDaoBase<AccountModelDao, Account, 
                 return parentAccountId.equals(input.getParentAccountId());
             }
         }));
+    }
+
+    @Override
+    public List<AuditLogWithHistory> getAuditLogsWithHistoryForId(final UUID accountId, final AuditLevel auditLevel, final InternalTenantContext context) throws AccountApiException {
+        throw new UnsupportedOperationException();
+    }
+
+    @Override
+    public List<AuditLogWithHistory> getEmailAuditLogsWithHistoryForId(final UUID accountEmailId, final AuditLevel auditLevel, final InternalTenantContext context) throws AccountApiException {
+        throw new UnsupportedOperationException();
     }
 }

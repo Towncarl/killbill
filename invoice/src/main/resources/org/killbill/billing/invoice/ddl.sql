@@ -1,5 +1,27 @@
 /*! SET default_storage_engine=INNODB */;
 
+DROP TABLE IF EXISTS invoice_tracking_ids;
+CREATE TABLE invoice_tracking_ids (
+    record_id serial unique,
+    id varchar(36) NOT NULL,
+    tracking_id varchar(128) NOT NULL,
+    invoice_id varchar(36) NOT NULL,
+    subscription_id varchar(36),
+    unit_type varchar(255) NOT NULL,
+    record_date date NOT NULL,
+    is_active boolean default true,
+    created_by varchar(50) NOT NULL,
+    created_date datetime NOT NULL,
+    updated_by varchar(50) NOT NULL,
+    updated_date datetime NOT NULL,
+    account_record_id bigint /*! unsigned */ not null,
+    tenant_record_id bigint /*! unsigned */ not null default 0,
+    PRIMARY KEY(record_id)
+) /*! CHARACTER SET utf8 COLLATE utf8_bin */;
+CREATE INDEX invoice_tracking_tenant_account_date_idx ON invoice_tracking_ids(tenant_record_id, account_record_id, record_date);
+CREATE INDEX invoice_tracking_invoice_id_idx ON invoice_tracking_ids(invoice_id);
+
+
 DROP TABLE IF EXISTS invoice_items;
 CREATE TABLE invoice_items (
     record_id serial unique,
@@ -11,6 +33,7 @@ CREATE TABLE invoice_items (
     bundle_id varchar(36),
     subscription_id varchar(36),
     description varchar(255),
+    product_name varchar(255),
     plan_name varchar(255),
     phase_name varchar(255),
     usage_name varchar(255),
@@ -20,6 +43,8 @@ CREATE TABLE invoice_items (
     rate numeric(15,9) NULL,
     currency varchar(3) NOT NULL,
     linked_item_id varchar(36),
+    quantity int,
+    item_details text,
     created_by varchar(50) NOT NULL,
     created_date datetime NOT NULL,
     account_record_id bigint /*! unsigned */ not null,

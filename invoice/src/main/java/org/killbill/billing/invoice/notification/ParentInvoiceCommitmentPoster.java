@@ -25,6 +25,7 @@ import org.joda.time.DateTime;
 import org.joda.time.LocalDate;
 import org.killbill.billing.callcontext.InternalCallContext;
 import org.killbill.billing.invoice.api.DefaultInvoiceService;
+import org.killbill.billing.platform.api.KillbillService.KILLBILL_SERVICES;
 import org.killbill.billing.util.entity.dao.EntitySqlDaoWrapperFactory;
 import org.killbill.notificationq.api.NotificationEventWithMetadata;
 import org.killbill.notificationq.api.NotificationQueue;
@@ -52,13 +53,13 @@ public class ParentInvoiceCommitmentPoster {
                                                            final InternalCallContext internalCallContext) {
         final NotificationQueue commitInvoiceQueue;
         try {
-            commitInvoiceQueue = notificationQueueService.getNotificationQueue(DefaultInvoiceService.INVOICE_SERVICE_NAME,
+            commitInvoiceQueue = notificationQueueService.getNotificationQueue(KILLBILL_SERVICES.INVOICE_SERVICE.getServiceName(),
                                                                                ParentInvoiceCommitmentNotifier.PARENT_INVOICE_COMMITMENT_NOTIFIER_QUEUE);
 
             // If we see existing notification for the same date we don't insert a new notification
             final Iterable<NotificationEventWithMetadata<ParentInvoiceCommitmentNotificationKey>> futureNotifications = commitInvoiceQueue.getFutureNotificationFromTransactionForSearchKeys(internalCallContext.getAccountRecordId(), internalCallContext.getTenantRecordId(), entitySqlDaoWrapperFactory.getHandle().getConnection());
 
-            boolean existingFutureNotificationWithSameDate = false;
+            boolean existingFutureNotificationWithSameDateAndInvoiceId = false;
             final Iterator<NotificationEventWithMetadata<ParentInvoiceCommitmentNotificationKey>> iterator = futureNotifications.iterator();
             try {
                 while (iterator.hasNext()) {
@@ -66,8 +67,8 @@ public class ParentInvoiceCommitmentPoster {
                     final LocalDate notificationEffectiveLocaleDate = internalCallContext.toLocalDate(futureNotificationTime);
                     final LocalDate eventEffectiveLocaleDate = internalCallContext.toLocalDate(input.getEffectiveDate());
 
-                    if (notificationEffectiveLocaleDate.compareTo(eventEffectiveLocaleDate) == 0) {
-                        existingFutureNotificationWithSameDate = true;
+                    if (notificationEffectiveLocaleDate.compareTo(eventEffectiveLocaleDate) == 0 && input.getEvent().getUuidKey().equals(invoiceId)) {
+                        existingFutureNotificationWithSameDateAndInvoiceId = true;
                     }
                 }
             } finally {
@@ -77,7 +78,7 @@ public class ParentInvoiceCommitmentPoster {
                 }
             }
 
-            if (!existingFutureNotificationWithSameDate) {
+            if (!existingFutureNotificationWithSameDateAndInvoiceId) {
                 log.info("Queuing parent invoice commitment notification at {} for invoiceId {}", futureNotificationTime.toString(), invoiceId.toString());
 
                 commitInvoiceQueue.recordFutureNotificationFromTransaction(entitySqlDaoWrapperFactory.getHandle().getConnection(), futureNotificationTime,

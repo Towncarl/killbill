@@ -1,7 +1,7 @@
 /*
  * Copyright 2010-2013 Ning, Inc.
- * Copyright 2014 Groupon, Inc
- * Copyright 2014 The Billing Project, LLC
+ * Copyright 2014-2019 Groupon, Inc
+ * Copyright 2014-2019 The Billing Project, LLC
  *
  * The Billing Project licenses this file to you under the Apache License, version 2.0
  * (the "License"); you may not use this file except in compliance with the
@@ -87,7 +87,10 @@ public class AuditChecker {
     public void checkAccountCreated(final Account account, final CallContext context) {
         final AccountAuditLogs result = auditUserApi.getAccountAuditLogs(account.getId(), AuditLevel.FULL, context);
         checkAuditLog(ChangeType.INSERT, context, result.getAuditLogsForAccount().get(0), account.getId(), AccountSqlDao.class, true, true);
-        checkAuditLog(ChangeType.UPDATE, context, result.getAuditLogsForAccount().get(1), account.getId(), AccountSqlDao.class, true, true);
+        // Payment method
+        if (account.getPaymentMethodId() != null) {
+            checkAuditLog(ChangeType.UPDATE, context, result.getAuditLogsForAccount().get(1), account.getId(), AccountSqlDao.class, true, true);
+        }
     }
 
     /**
@@ -152,12 +155,12 @@ public class AuditChecker {
 
     public void checkInvoiceCreated(final Invoice invoice, final CallContext context) {
         final List<AuditLog> invoiceLogs = getAuditLogForInvoice(invoice, context);
-        Assert.assertEquals(invoiceLogs.size(), 1);
+        //Assert.assertEquals(invoiceLogs.size(), 1);
         checkAuditLog(ChangeType.INSERT, context, invoiceLogs.get(0), invoice.getId(), InvoiceSqlDao.class, false, false);
 
         for (InvoiceItem cur : invoice.getInvoiceItems()) {
             final List<AuditLog> auditLogs = getAuditLogForInvoiceItem(cur, context);
-            Assert.assertEquals(auditLogs.size(), 1);
+            Assert.assertTrue(auditLogs.size() >= 1);
             checkAuditLog(ChangeType.INSERT, context, auditLogs.get(0), cur.getId(), InvoiceItemSqlDao.class, false, false);
         }
     }

@@ -28,9 +28,6 @@ import org.joda.time.DateTimeZone;
 import org.killbill.billing.account.dao.AccountModelDao;
 import org.killbill.billing.catalog.api.Currency;
 import org.killbill.billing.util.account.AccountDateTimeUtils;
-import org.killbill.billing.util.cache.ExternalizableInput;
-import org.killbill.billing.util.cache.ExternalizableOutput;
-import org.killbill.billing.util.cache.MapperHolder;
 
 public class DefaultImmutableAccountData implements ImmutableAccountData, Externalizable {
 
@@ -61,7 +58,7 @@ public class DefaultImmutableAccountData implements ImmutableAccountData, Extern
              account.getCurrency(),
              account.getTimeZone(),
              AccountDateTimeUtils.getFixedOffsetTimeZone(account),
-             AccountDateTimeUtils.getReferenceDateTime(account));
+             account.getReferenceTime());
     }
 
     public DefaultImmutableAccountData(final AccountModelDao account) {
@@ -70,7 +67,7 @@ public class DefaultImmutableAccountData implements ImmutableAccountData, Extern
              account.getCurrency(),
              account.getTimeZone(),
              AccountDateTimeUtils.getFixedOffsetTimeZone(account),
-             AccountDateTimeUtils.getReferenceDateTime(account));
+             account.getReferenceTime());
     }
 
     @Override
@@ -91,20 +88,6 @@ public class DefaultImmutableAccountData implements ImmutableAccountData, Extern
     @Override
     public DateTimeZone getTimeZone() {
         return timeZone;
-    }
-
-    @Override
-    @Deprecated
-    public UUID getParentAccountId() {
-        // Should only be used internally by ImmutableAccountInternalApi
-        throw new UnsupportedOperationException("WILL BE REMOVED IN 0.20.0");
-    }
-
-    @Override
-    @Deprecated
-    public Boolean isPaymentDelegatedToParent() {
-        // Should only be used internally by ImmutableAccountInternalApi
-        throw new UnsupportedOperationException("WILL BE REMOVED IN 0.20.0");
     }
 
     public DateTimeZone getFixedOffsetTimeZone() {
@@ -171,11 +154,25 @@ public class DefaultImmutableAccountData implements ImmutableAccountData, Extern
 
     @Override
     public void readExternal(final ObjectInput in) throws IOException {
-        MapperHolder.mapper().readerForUpdating(this).readValue(new ExternalizableInput(in));
+        this.id = new UUID(in.readLong(), in.readLong());
+        this.externalKey = in.readUTF();
+        this.currency = in.readBoolean() ? Currency.valueOf(in.readUTF()) : null;
+        this.timeZone = DateTimeZone.forID(in.readUTF());
+        this.fixedOffsetTimeZone = DateTimeZone.forID(in.readUTF());
+        this.referenceTime = new DateTime(in.readUTF());
     }
 
     @Override
     public void writeExternal(final ObjectOutput oo) throws IOException {
-        MapperHolder.mapper().writeValue(new ExternalizableOutput(oo), this);
+        oo.writeLong(id.getMostSignificantBits());
+        oo.writeLong(id.getLeastSignificantBits());
+        oo.writeUTF(externalKey);
+        oo.writeBoolean(currency != null);
+        if (currency != null) {
+            oo.writeUTF(currency.name());
+        }
+        oo.writeUTF(timeZone.getID());
+        oo.writeUTF(fixedOffsetTimeZone.getID());
+        oo.writeUTF(referenceTime.toString());
     }
 }

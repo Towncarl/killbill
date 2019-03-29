@@ -37,7 +37,6 @@ import org.killbill.billing.callcontext.InternalTenantContext;
 import org.killbill.billing.catalog.api.BillingPeriod;
 import org.killbill.billing.catalog.api.Catalog;
 import org.killbill.billing.catalog.api.CatalogApiException;
-import org.killbill.billing.catalog.api.CatalogService;
 import org.killbill.billing.catalog.api.Currency;
 import org.killbill.billing.catalog.api.Plan;
 import org.killbill.billing.catalog.api.PlanPhase;
@@ -49,6 +48,7 @@ import org.killbill.billing.subscription.api.SubscriptionBase;
 import org.killbill.billing.subscription.api.SubscriptionBaseTransitionType;
 
 import com.google.common.annotations.VisibleForTesting;
+import com.google.common.base.Preconditions;
 import com.google.common.base.Function;
 import com.google.common.base.Predicate;
 import com.google.common.collect.ImmutableList;
@@ -63,12 +63,10 @@ public class BlockingCalculator {
     private static final AtomicLong globaltotalOrder = new AtomicLong();
 
     private final BlockingInternalApi blockingApi;
-    private final CatalogService catalogService;
 
     @Inject
-    public BlockingCalculator(final BlockingInternalApi blockingApi, final CatalogService catalogService) {
+    public BlockingCalculator(final BlockingInternalApi blockingApi) {
         this.blockingApi = blockingApi;
-        this.catalogService = catalogService;
     }
 
     /**
@@ -76,17 +74,15 @@ public class BlockingCalculator {
      *
      * @param billingEvents the original list of billing events to update (without overdue events)
      */
-    public boolean insertBlockingEvents(final SortedSet<BillingEvent> billingEvents, final Set<UUID> skippedSubscriptions, final InternalTenantContext context) throws CatalogApiException {
+    public boolean insertBlockingEvents(final SortedSet<BillingEvent> billingEvents, final Set<UUID> skippedSubscriptions, final Map<UUID, List<SubscriptionBase>> subscriptionsForAccount, final Catalog catalog, final InternalTenantContext context) throws CatalogApiException {
         if (billingEvents.size() <= 0) {
             return false;
         }
 
-        final Hashtable<UUID, List<SubscriptionBase>> bundleMap = createBundleSubscriptionMap(billingEvents);
-
         final SortedSet<BillingEvent> billingEventsToAdd = new TreeSet<BillingEvent>();
         final SortedSet<BillingEvent> billingEventsToRemove = new TreeSet<BillingEvent>();
 
-        final List<BlockingState> blockingEvents = blockingApi.getBlockingAllForAccount(context);
+        final List<BlockingState> blockingEvents = blockingApi.getBlockingAllForAccount(catalog, context);
 
         final Iterable<BlockingState> accountBlockingEvents = Iterables.filter(blockingEvents, new Predicate<BlockingState>() {
             @Override
@@ -98,11 +94,11 @@ public class BlockingCalculator {
         final Map<UUID, List<BlockingState>> perBundleBlockingEvents = getPerTypeBlockingEvents(BlockingStateType.SUBSCRIPTION_BUNDLE, blockingEvents);
         final Map<UUID, List<BlockingState>> perSubscriptionBlockingEvents = getPerTypeBlockingEvents(BlockingStateType.SUBSCRIPTION, blockingEvents);
 
-        for (final UUID bundleId : bundleMap.keySet()) {
+        for (final UUID bundleId : subscriptionsForAccount.keySet()) {
 
             final List<BlockingState> bundleBlockingEvents = perBundleBlockingEvents.get(bundleId) != null ? perBundleBlockingEvents.get(bundleId) : ImmutableList.<BlockingState>of();
 
-            for (final SubscriptionBase subscription : bundleMap.get(bundleId)) {
+            for (final SubscriptionBase subscription : subscriptionsForAccount.get(bundleId)) {
                 // Avoid inserting additional events for subscriptions that don't even have a START event
                 if (skippedSubscriptions.contains(subscription.getId())) {
                     continue;
@@ -114,7 +110,7 @@ public class BlockingCalculator {
 
                 final SortedSet<BillingEvent> subscriptionBillingEvents = filter(billingEvents, subscription);
 
-                final SortedSet<BillingEvent> newEvents = createNewEvents(accountBlockingDurations, subscriptionBillingEvents, context);
+                final SortedSet<BillingEvent> newEvents = createNewEvents(accountBlockingDurations, subscriptionBillingEvents, catalog, context);
                 billingEventsToAdd.addAll(newEvents);
 
                 final SortedSet<BillingEvent> removedEvents = eventsToRemove(accountBlockingDurations, subscriptionBillingEvents);
@@ -183,10 +179,11 @@ public class BlockingCalculator {
         return result;
     }
 
-    protected SortedSet<BillingEvent> createNewEvents(final List<DisabledDuration> disabledDuration, final SortedSet<BillingEvent> subscriptionBillingEvents, final InternalTenantContext context) throws CatalogApiException {
+    protected SortedSet<BillingEvent> createNewEvents(final List<DisabledDuration> disabledDuration, final SortedSet<BillingEvent> subscriptionBillingEvents, final Catalog catalog, final InternalTenantContext context) throws CatalogApiException {
+
+        Preconditions.checkState(context.getAccountRecordId() != null);
 
         final SortedSet<BillingEvent> result = new TreeSet<BillingEvent>();
-        final Catalog catalog = catalogService.getFullCatalog(true, true, context);
 
         for (final DisabledDuration duration : disabledDuration) {
             // The first one before the blocked duration
@@ -229,7 +226,7 @@ public class BlockingCalculator {
     protected SortedSet<BillingEvent> filter(final SortedSet<BillingEvent> billingEvents, final SubscriptionBase subscription) {
         final SortedSet<BillingEvent> result = new TreeSet<BillingEvent>();
         for (final BillingEvent event : billingEvents) {
-            if (event.getSubscription().getId().equals(subscription.getId())) {
+            if (event.getSubscriptionId().equals(subscription.getId())) {
                 result.add(event);
             }
         }
@@ -239,7 +236,6 @@ public class BlockingCalculator {
     protected BillingEvent createNewDisableEvent(final DateTime disabledDurationStart, final BillingEvent previousEvent, final Catalog catalog) throws CatalogApiException {
 
         final int billCycleDay = previousEvent.getBillCycleDayLocal();
-        final SubscriptionBase subscription = previousEvent.getSubscription();
         final DateTime effectiveDate = disabledDurationStart;
         final PlanPhase planPhase = previousEvent.getPlanPhase();
         final Plan plan = previousEvent.getPlan();
@@ -247,6 +243,7 @@ public class BlockingCalculator {
         // Make sure to set the fixed price to null and the billing period to NO_BILLING_PERIOD,
         // which makes invoice disregard this event
         final BigDecimal fixedPrice = null;
+        final BigDecimal recurringPrice = null;
         final BillingPeriod billingPeriod = BillingPeriod.NO_BILLING_PERIOD;
 
         final Currency currency = previousEvent.getCurrency();
@@ -254,16 +251,26 @@ public class BlockingCalculator {
         final SubscriptionBaseTransitionType type = SubscriptionBaseTransitionType.START_BILLING_DISABLED;
         final Long totalOrdering = globaltotalOrder.getAndIncrement();
 
-        return new DefaultBillingEvent(subscription, effectiveDate, true, plan, planPhase, fixedPrice,
+        return new DefaultBillingEvent(previousEvent.getSubscriptionId(),
+                                       previousEvent.getBundleId(),
+                                       effectiveDate,
+                                       plan,
+                                       planPhase,
+                                       fixedPrice,
                                        currency,
-                                       billingPeriod, billCycleDay,
-                                       description, totalOrdering, type, catalog, true);
+                                       billingPeriod,
+                                       previousEvent.getLastChangePlanDate(),
+                                       billCycleDay,
+                                       description,
+                                       totalOrdering,
+                                       type,
+                                       true,
+                                       catalog);
     }
 
     protected BillingEvent createNewReenableEvent(final DateTime odEventTime, final BillingEvent previousEvent, final Catalog catalog, final InternalTenantContext context) throws CatalogApiException {
         // All fields are populated with the event state from before the blocking period, for invoice to resume invoicing
         final int billCycleDay = previousEvent.getBillCycleDayLocal();
-        final SubscriptionBase subscription = previousEvent.getSubscription();
         final DateTime effectiveDate = odEventTime;
         final PlanPhase planPhase = previousEvent.getPlanPhase();
         final BigDecimal fixedPrice = previousEvent.getFixedPrice();
@@ -274,26 +281,21 @@ public class BlockingCalculator {
         final SubscriptionBaseTransitionType type = SubscriptionBaseTransitionType.END_BILLING_DISABLED;
         final Long totalOrdering = globaltotalOrder.getAndIncrement();
 
-        return new DefaultBillingEvent(subscription, effectiveDate, true, plan, planPhase, fixedPrice,
+        return new DefaultBillingEvent(previousEvent.getSubscriptionId(),
+                                       previousEvent.getBundleId(),
+                                       effectiveDate,
+                                       plan,
+                                       planPhase,
+                                       fixedPrice,
                                        currency,
-                                       billingPeriod, billCycleDay,
-                                       description, totalOrdering, type, catalog, false);
-    }
-
-    protected Hashtable<UUID, List<SubscriptionBase>> createBundleSubscriptionMap(final SortedSet<BillingEvent> billingEvents) {
-        final Hashtable<UUID, List<SubscriptionBase>> result = new Hashtable<UUID, List<SubscriptionBase>>();
-        for (final BillingEvent event : billingEvents) {
-            final UUID bundleId = event.getSubscription().getBundleId();
-            List<SubscriptionBase> subs = result.get(bundleId);
-            if (subs == null) {
-                subs = new ArrayList<SubscriptionBase>();
-                result.put(bundleId, subs);
-            }
-            if (!result.get(bundleId).contains(event.getSubscription())) {
-                subs.add(event.getSubscription());
-            }
-        }
-        return result;
+                                       billingPeriod,
+                                       previousEvent.getLastChangePlanDate(),
+                                       billCycleDay,
+                                       description,
+                                       totalOrdering,
+                                       type,
+                                       false,
+                                       catalog);
     }
 
     // In ascending order

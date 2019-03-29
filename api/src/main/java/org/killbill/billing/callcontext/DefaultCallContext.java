@@ -16,46 +16,61 @@
 
 package org.killbill.billing.callcontext;
 
+import java.io.Externalizable;
+import java.io.IOException;
+import java.io.ObjectInput;
+import java.io.ObjectOutput;
 import java.util.UUID;
 
 import org.joda.time.DateTime;
-
-import org.killbill.clock.Clock;
+import org.killbill.billing.util.callcontext.CallContext;
 import org.killbill.billing.util.callcontext.CallOrigin;
 import org.killbill.billing.util.callcontext.UserType;
+import org.killbill.clock.Clock;
 
-public class DefaultCallContext extends CallContextBase {
+public class DefaultCallContext extends CallContextBase implements Externalizable {
 
-    private final DateTime createdDate;
-    private final DateTime updateDate;
+    private DateTime createdDate;
+    private DateTime updateDate;
 
-    public DefaultCallContext(final UUID tenantId, final String userName, final CallOrigin callOrigin, final UserType userType,
+    // For deserialization
+    public DefaultCallContext() {
+    }
+
+    public DefaultCallContext(final UUID accountId, final UUID tenantId, final String userName, final CallOrigin callOrigin, final UserType userType,
                               final UUID userToken, final Clock clock) {
-        super(tenantId, userName, callOrigin, userType, userToken);
+        super(accountId, tenantId, userName, callOrigin, userType, userToken);
         this.createdDate = clock.getUTCNow();
         this.updateDate = createdDate;
     }
 
-    public DefaultCallContext(final UUID tenantId, final String userName, final CallOrigin callOrigin, final UserType userType,
+    public DefaultCallContext(final UUID accountId, final UUID tenantId, final String userName, final CallOrigin callOrigin, final UserType userType,
                               final String reasonCode, final String comment,
                               final UUID userToken, final Clock clock) {
-        super(tenantId, userName, callOrigin, userType, reasonCode, comment, userToken);
+        super(accountId, tenantId, userName, callOrigin, userType, reasonCode, comment, userToken);
         this.createdDate = clock.getUTCNow();
         this.updateDate = createdDate;
     }
 
-    public DefaultCallContext(final UUID tenantId, final String userName, final DateTime createdDate, final String reasonCode,
+    public DefaultCallContext(final UUID accountId, final UUID tenantId, final String userName, final DateTime createdDate, final String reasonCode,
                               final String comment, final UUID userToken) {
-        super(tenantId, userName, null, null, reasonCode, comment, userToken);
+        super(accountId, tenantId, userName, null, null, reasonCode, comment, userToken);
         this.createdDate = createdDate;
         this.updateDate = createdDate;
     }
 
-    public DefaultCallContext(final UUID tenantId, final String userName, final CallOrigin callOrigin, final UserType userType, final String reasonCode,
+    public DefaultCallContext(final UUID accountId, final UUID tenantId, final String userName, final CallOrigin callOrigin, final UserType userType, final String reasonCode,
                               final String comment, final UUID userToken, final DateTime createdDate, final DateTime updatedDate) {
-        super(tenantId, userName, callOrigin, userType, reasonCode, comment, userToken);
+        super(accountId, tenantId, userName, callOrigin, userType, reasonCode, comment, userToken);
         this.createdDate = createdDate;
         this.updateDate = updatedDate;
+    }
+
+    // For testing
+    public DefaultCallContext(final CallContext callContext) {
+        super(callContext.getAccountId(), callContext.getTenantId(), callContext.getUserName(), callContext.getCallOrigin(), callContext.getUserType(), callContext.getReasonCode(), callContext.getComments(),  callContext.getUserToken());
+        this.createdDate = callContext.getCreatedDate();
+        this.updateDate = callContext.getUpdatedDate();
     }
 
     @Override
@@ -72,7 +87,9 @@ public class DefaultCallContext extends CallContextBase {
     public String toString() {
         final StringBuilder sb = new StringBuilder();
         sb.append("CallContextBase");
-        sb.append("{userToken=").append(userToken);
+        sb.append("{accountId=").append(accountId);
+        sb.append(", tenantId='").append(tenantId).append('\'');
+        sb.append(", userToken='").append(userToken).append('\'');
         sb.append(", userName='").append(userName).append('\'');
         sb.append(", callOrigin=").append(callOrigin);
         sb.append(", userType=").append(userType);
@@ -95,6 +112,12 @@ public class DefaultCallContext extends CallContextBase {
 
         final DefaultCallContext that = (DefaultCallContext) o;
 
+        if (accountId != null ? !accountId.equals(that.accountId) : that.accountId != null) {
+            return false;
+        }
+        if (tenantId != null ? !tenantId.equals(that.tenantId) : that.tenantId != null) {
+            return false;
+        }
         if (callOrigin != that.callOrigin) {
             return false;
         }
@@ -116,13 +139,14 @@ public class DefaultCallContext extends CallContextBase {
         if (userType != that.userType) {
             return false;
         }
-
         return true;
     }
 
     @Override
     public int hashCode() {
-        int result = userToken != null ? userToken.hashCode() : 0;
+        int result = accountId != null ? accountId.hashCode() : 0;
+        result = 31 * result + (tenantId != null ? tenantId.hashCode() : 0);
+        result = 31 * result + (userToken != null ? userToken.hashCode() : 0);
         result = 31 * result + (userName != null ? userName.hashCode() : 0);
         result = 31 * result + (callOrigin != null ? callOrigin.hashCode() : 0);
         result = 31 * result + (userType != null ? userType.hashCode() : 0);
@@ -130,5 +154,19 @@ public class DefaultCallContext extends CallContextBase {
         result = 31 * result + (comments != null ? comments.hashCode() : 0);
         result = 31 * result + (createdDate != null ? createdDate.hashCode() : 0);
         return result;
+    }
+
+    @Override
+    public void writeExternal(final ObjectOutput out) throws IOException {
+        super.writeExternal(out);
+        out.writeUTF(createdDate.toString());
+        out.writeUTF(updateDate.toString());
+    }
+
+    @Override
+    public void readExternal(final ObjectInput in) throws IOException, ClassNotFoundException {
+        super.readExternal(in);
+        this.createdDate = new DateTime(in.readUTF());
+        this.updateDate = new DateTime(in.readUTF());
     }
 }

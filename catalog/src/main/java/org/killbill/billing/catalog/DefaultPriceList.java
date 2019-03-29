@@ -1,7 +1,9 @@
 /*
  * Copyright 2010-2013 Ning, Inc.
+ * Copyright 2014-2018 Groupon, Inc
+ * Copyright 2014-2018 The Billing Project, LLC
  *
- * Ning licenses this file to you under the Apache License, version 2.0
+ * The Billing Project licenses this file to you under the Apache License, version 2.0
  * (the "License"); you may not use this file except in compliance with the
  * License.  You may obtain a copy of the License at:
  *
@@ -16,6 +18,10 @@
 
 package org.killbill.billing.catalog;
 
+import java.io.Externalizable;
+import java.io.IOException;
+import java.io.ObjectInput;
+import java.io.ObjectOutput;
 import java.net.URI;
 import java.util.ArrayList;
 import java.util.Collection;
@@ -37,23 +43,26 @@ import org.killbill.xmlloader.ValidatingConfig;
 import org.killbill.xmlloader.ValidationErrors;
 
 @XmlAccessorType(XmlAccessType.NONE)
-public class DefaultPriceList extends ValidatingConfig<StandaloneCatalog> implements PriceList {
+public class DefaultPriceList extends ValidatingConfig<StandaloneCatalog> implements PriceList, Externalizable {
 
     @XmlAttribute(required = true)
     @XmlID
     private String name;
 
+    @XmlAttribute(required = false)
+    private String prettyName;
+
     @XmlElementWrapper(name = "plans", required = true)
     @XmlIDREF
-    @XmlElement(type=DefaultPlan.class, name = "plan", required = false)
+    @XmlElement(type = DefaultPlan.class, name = "plan", required = false)
     private CatalogEntityCollection<Plan> plans;
 
     public DefaultPriceList() {
-        this.plans = new CatalogEntityCollection();
+        this.plans = new CatalogEntityCollection<Plan>();
     }
 
     public DefaultPriceList(final DefaultPlan[] plans, final String name) {
-        this.plans = new CatalogEntityCollection(plans);
+        this.plans = new CatalogEntityCollection<Plan>(plans);
         this.name = name;
     }
 
@@ -62,21 +71,20 @@ public class DefaultPriceList extends ValidatingConfig<StandaloneCatalog> implem
         return plans;
     }
 
-
     public CatalogEntityCollection<Plan> getCatalogEntityCollectionPlan() {
         return plans;
     }
-    /* (non-Javadoc)
-      * @see org.killbill.billing.catalog.IPriceList#getName()
-      */
+
     @Override
     public String getName() {
         return name;
     }
 
-    /* (non-Javadoc)
-      * @see org.killbill.billing.catalog.IPriceList#findPlan(org.killbill.billing.catalog.api.IProduct, org.killbill.billing.catalog.api.BillingPeriod)
-      */
+    @Override
+    public String getPrettyName() {
+        return prettyName;
+    }
+
     @Override
     public Collection<Plan> findPlans(final Product product, final BillingPeriod period) {
         final List<Plan> result = new ArrayList<Plan>(plans.size());
@@ -98,11 +106,14 @@ public class DefaultPriceList extends ValidatingConfig<StandaloneCatalog> implem
         return errors;
     }
 
-
     @Override
-    public void initialize(final StandaloneCatalog catalog, final URI sourceURI) {
-        super.initialize(catalog, sourceURI);
+    public void initialize(final StandaloneCatalog catalog) {
+        super.initialize(catalog);
         CatalogSafetyInitializer.initializeNonRequiredNullFieldsWithDefaultValue(this);
+
+        if (prettyName == null) {
+            this.prettyName = name;
+        }
     }
 
     public DefaultPriceList setName(final String name) {
@@ -146,5 +157,25 @@ public class DefaultPriceList extends ValidatingConfig<StandaloneCatalog> implem
     public String toString() {
         return "DefaultPriceList{" +
                "name='" + name + '}';
+    }
+
+    @Override
+    public void writeExternal(final ObjectOutput out) throws IOException {
+        out.writeBoolean(name != null);
+        if (name != null) {
+            out.writeUTF(name);
+        }
+        out.writeBoolean(prettyName != null);
+        if (prettyName != null) {
+            out.writeUTF(prettyName);
+        }
+        out.writeObject(plans);
+    }
+
+    @Override
+    public void readExternal(final ObjectInput in) throws IOException, ClassNotFoundException {
+        this.name = in.readBoolean() ? in.readUTF() : null;
+        this.prettyName = in.readBoolean() ? in.readUTF() : null;
+        this.plans = (CatalogEntityCollection<Plan>) in.readObject();
     }
 }

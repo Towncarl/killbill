@@ -1,7 +1,7 @@
 /*
  * Copyright 2010-2013 Ning, Inc.
- * Copyright 2014-2017 Groupon, Inc
- * Copyright 2014-2017 The Billing Project, LLC
+ * Copyright 2014-2018 Groupon, Inc
+ * Copyright 2014-2018 The Billing Project, LLC
  *
  * The Billing Project licenses this file to you under the Apache License, version 2.0
  * (the "License"); you may not use this file except in compliance with the
@@ -19,6 +19,7 @@
 package org.killbill.billing.junction.plumbing.billing;
 
 import java.util.List;
+import java.util.UUID;
 
 import org.joda.time.DateTime;
 import org.joda.time.LocalDate;
@@ -30,14 +31,18 @@ import org.killbill.billing.api.TestApiListener.NextEvent;
 import org.killbill.billing.catalog.api.BillingPeriod;
 import org.killbill.billing.catalog.api.PlanPhaseSpecifier;
 import org.killbill.billing.catalog.api.PriceListSet;
-import org.killbill.billing.entitlement.EntitlementService;
+import org.killbill.billing.entitlement.api.BaseEntitlementWithAddOnsSpecifier;
 import org.killbill.billing.entitlement.api.BlockingStateType;
+import org.killbill.billing.entitlement.api.DefaultBaseEntitlementWithAddOnsSpecifier;
 import org.killbill.billing.entitlement.api.DefaultEntitlementApi;
+import org.killbill.billing.entitlement.api.DefaultEntitlementSpecifier;
 import org.killbill.billing.entitlement.api.Entitlement;
+import org.killbill.billing.entitlement.api.EntitlementSpecifier;
 import org.killbill.billing.junction.BillingEvent;
 import org.killbill.billing.junction.DefaultBlockingState;
 import org.killbill.billing.junction.JunctionTestSuiteWithEmbeddedDB;
 import org.killbill.billing.payment.api.PluginProperty;
+import org.killbill.billing.platform.api.KillbillService.KILLBILL_SERVICES;
 import org.killbill.billing.subscription.api.SubscriptionBase;
 import org.killbill.billing.subscription.api.SubscriptionBaseTransitionType;
 import org.testng.Assert;
@@ -46,6 +51,239 @@ import org.testng.annotations.Test;
 import com.google.common.collect.ImmutableList;
 
 public class TestDefaultInternalBillingApi extends JunctionTestSuiteWithEmbeddedDB {
+
+    @Test(groups = "slow")
+    public void testRecurringInArrear() throws Exception {
+        final LocalDate initialDate = new LocalDate(2013, 8, 7);
+        clock.setDay(initialDate);
+
+        // Account with no BCD
+        final Account account = createAccount(getAccountData(0));
+        Assert.assertEquals(account.getBillCycleDayLocal(), (Integer) 0);
+
+        // Create base entitlement
+        final String bundleKey = UUID.randomUUID().toString();
+        final EntitlementSpecifier entitlementSpecifierBase = new DefaultEntitlementSpecifier(new PlanPhaseSpecifier("Cannon", BillingPeriod.MONTHLY, PriceListSet.DEFAULT_PRICELIST_NAME, null));
+        final BaseEntitlementWithAddOnsSpecifier specifier = new DefaultBaseEntitlementWithAddOnsSpecifier(null, bundleKey, ImmutableList.of(entitlementSpecifierBase), null, null, false);
+        testListener.pushExpectedEvents(NextEvent.CREATE, NextEvent.BLOCK);
+        entitlementApi.createBaseEntitlementsWithAddOns(account.getId(),
+                                                        ImmutableList.of(specifier),
+                                                        false,
+                                                        ImmutableList.<PluginProperty>of(),
+                                                        callContext);
+        assertListenerStatus();
+
+        final List<Entitlement> entitlements = entitlementApi.getAllEntitlementsForAccountId(account.getId(), callContext);
+        Assert.assertEquals(entitlements.size(), 1);
+        Assert.assertEquals(entitlements.get(0).getLastActiveProduct().getName(), "Cannon");
+        Assert.assertNull(entitlements.get(0).getBillCycleDayLocal());
+
+        // Account still has no BCD
+        final Account accountNoBCD = accountApi.getAccountById(account.getId(), callContext);
+        Assert.assertEquals(accountNoBCD.getBillCycleDayLocal(), (Integer) 0);
+
+        List<BillingEvent> events = ImmutableList.<BillingEvent>copyOf(billingInternalApi.getBillingEventsForAccountAndUpdateAccountBCD(account.getId(), null, internalCallContext));
+        Assert.assertEquals(events.size(), 1);
+        Assert.assertEquals(events.get(0).getBillCycleDayLocal(), 7);
+
+        // Verify BCD
+        final Account accountWithBCD = accountApi.getAccountById(account.getId(), callContext);
+        Assert.assertEquals(accountWithBCD.getBillCycleDayLocal(), (Integer) 7);
+
+        // Verify GET
+        final List<Entitlement> entitlementsUpdated = entitlementApi.getAllEntitlementsForAccountId(account.getId(), callContext);
+        Assert.assertEquals(entitlementsUpdated.size(), 1);
+        Assert.assertEquals(entitlementsUpdated.get(0).getLastActiveProduct().getName(), "Cannon");
+        Assert.assertEquals(entitlementsUpdated.get(0).getBillCycleDayLocal(), (Integer) 7);
+
+        events = ImmutableList.<BillingEvent>copyOf(billingInternalApi.getBillingEventsForAccountAndUpdateAccountBCD(account.getId(), null, internalCallContext));
+        Assert.assertEquals(events.size(), 1);
+        Assert.assertEquals(events.get(0).getBillCycleDayLocal(), 7);
+    }
+
+    @Test(groups = "slow")
+    public void testUsageInArrear() throws Exception {
+        final LocalDate initialDate = new LocalDate(2013, 8, 7);
+        clock.setDay(initialDate);
+
+        // Account with no BCD
+        final Account account = createAccount(getAccountData(0));
+        Assert.assertEquals(account.getBillCycleDayLocal(), (Integer) 0);
+
+        // Create base entitlement
+        final String bundleKey = UUID.randomUUID().toString();
+        final EntitlementSpecifier entitlementSpecifierBase = new DefaultEntitlementSpecifier(new PlanPhaseSpecifier("Trebuchet", BillingPeriod.NO_BILLING_PERIOD, PriceListSet.DEFAULT_PRICELIST_NAME, null));
+        final BaseEntitlementWithAddOnsSpecifier specifier = new DefaultBaseEntitlementWithAddOnsSpecifier(null, bundleKey, ImmutableList.of(entitlementSpecifierBase), null, null, false);
+        testListener.pushExpectedEvents(NextEvent.CREATE, NextEvent.BLOCK);
+        entitlementApi.createBaseEntitlementsWithAddOns(account.getId(),
+                                                        ImmutableList.of(specifier),
+                                                        false,
+                                                        ImmutableList.<PluginProperty>of(),
+                                                        callContext);
+        assertListenerStatus();
+
+        final List<Entitlement> entitlements = entitlementApi.getAllEntitlementsForAccountId(account.getId(), callContext);
+        Assert.assertEquals(entitlements.size(), 1);
+        Assert.assertEquals(entitlements.get(0).getLastActiveProduct().getName(), "Trebuchet");
+        Assert.assertNull(entitlements.get(0).getBillCycleDayLocal());
+
+        // Account still has no BCD
+        final Account accountNoBCD = accountApi.getAccountById(account.getId(), callContext);
+        Assert.assertEquals(accountNoBCD.getBillCycleDayLocal(), (Integer) 0);
+
+        List<BillingEvent> events = ImmutableList.<BillingEvent>copyOf(billingInternalApi.getBillingEventsForAccountAndUpdateAccountBCD(account.getId(), null, internalCallContext));
+        Assert.assertEquals(events.size(), 1);
+        Assert.assertEquals(events.get(0).getBillCycleDayLocal(), 7);
+
+        // Verify BCD
+        final Account accountWithBCD = accountApi.getAccountById(account.getId(), callContext);
+        Assert.assertEquals(accountWithBCD.getBillCycleDayLocal(), (Integer) 7);
+
+        // Verify GET
+        final List<Entitlement> entitlementsUpdated = entitlementApi.getAllEntitlementsForAccountId(account.getId(), callContext);
+        Assert.assertEquals(entitlementsUpdated.size(), 1);
+        Assert.assertEquals(entitlementsUpdated.get(0).getLastActiveProduct().getName(), "Trebuchet");
+        Assert.assertEquals(entitlementsUpdated.get(0).getBillCycleDayLocal(), (Integer) 7);
+
+        events = ImmutableList.<BillingEvent>copyOf(billingInternalApi.getBillingEventsForAccountAndUpdateAccountBCD(account.getId(), null, internalCallContext));
+        Assert.assertEquals(events.size(), 1);
+        Assert.assertEquals(events.get(0).getBillCycleDayLocal(), 7);
+    }
+
+    @Test(groups = "slow", description = "https://github.com/killbill/killbill/issues/865")
+    public void testBCDUpdateMultipleSubscriptionsAccountAligned() throws Exception {
+        final LocalDate initialDate = new LocalDate(2013, 8, 7);
+        clock.setDay(initialDate);
+
+        // Account with no BCD
+        final Account account = createAccount(getAccountData(0));
+        Assert.assertEquals(account.getBillCycleDayLocal(), (Integer) 0);
+
+        // Create 2 entitlements, one base with one add-on. All entitlements are ACCOUNT aligned
+        final String bundleKey1 = UUID.randomUUID().toString();
+        final EntitlementSpecifier entitlementSpecifierBase1 = new DefaultEntitlementSpecifier(new PlanPhaseSpecifier("Shotgun", BillingPeriod.MONTHLY, PriceListSet.DEFAULT_PRICELIST_NAME, null));
+        final EntitlementSpecifier entitlementSpecifierAO1 = new DefaultEntitlementSpecifier(new PlanPhaseSpecifier("Cabinet", BillingPeriod.TRIANNUAL, PriceListSet.DEFAULT_PRICELIST_NAME, null));
+        final BaseEntitlementWithAddOnsSpecifier specifier1 = new DefaultBaseEntitlementWithAddOnsSpecifier(null, bundleKey1, ImmutableList.of(entitlementSpecifierBase1, entitlementSpecifierAO1), null, null, false);
+        testListener.pushExpectedEvents(NextEvent.CREATE, NextEvent.BLOCK, NextEvent.CREATE, NextEvent.BLOCK);
+        entitlementApi.createBaseEntitlementsWithAddOns(account.getId(),
+                                                        ImmutableList.of(specifier1),
+                                                        false,
+                                                        ImmutableList.<PluginProperty>of(),
+                                                        callContext);
+        assertListenerStatus();
+
+        final List<Entitlement> entitlements = entitlementApi.getAllEntitlementsForAccountId(account.getId(), callContext);
+        Assert.assertEquals(entitlements.size(), 2);
+        Assert.assertEquals(entitlements.get(0).getLastActiveProduct().getName(), "Shotgun");
+        // See bug description at https://github.com/killbill/killbill/issues/865 and PR discussion at https://github.com/killbill/killbill/pull/1067/files/926ca68c32c8f8c93bd5eda94fba17f6e19e593d#r237981095
+        Assert.assertNull(entitlements.get(0).getBillCycleDayLocal());
+        Assert.assertEquals(entitlements.get(1).getLastActiveProduct().getName(), "Cabinet");
+        Assert.assertNull(entitlements.get(1).getBillCycleDayLocal());
+
+        // Account still has no BCD
+        final Account accountNoBCD = accountApi.getAccountById(account.getId(), callContext);
+        Assert.assertEquals(accountNoBCD.getBillCycleDayLocal(), (Integer) 0);
+
+        List<BillingEvent> events = ImmutableList.<BillingEvent>copyOf(billingInternalApi.getBillingEventsForAccountAndUpdateAccountBCD(account.getId(), null, internalCallContext));
+        Assert.assertEquals(events.size(), 3);
+        for (final BillingEvent billingEvent : events) {
+            Assert.assertEquals(billingEvent.getBillCycleDayLocal(), 7);
+        }
+
+        // Verify BCD
+        final Account accountWithBCD = accountApi.getAccountById(account.getId(), callContext);
+        Assert.assertEquals(accountWithBCD.getBillCycleDayLocal(), (Integer) 7);
+
+        // Verify GET
+        final List<Entitlement> entitlementsUpdated = entitlementApi.getAllEntitlementsForAccountId(account.getId(), callContext);
+        Assert.assertEquals(entitlementsUpdated.size(), 2);
+        Assert.assertEquals(entitlementsUpdated.get(0).getLastActiveProduct().getName(), "Shotgun");
+        Assert.assertEquals(entitlementsUpdated.get(0).getBillCycleDayLocal(), (Integer) 7);
+        Assert.assertEquals(entitlementsUpdated.get(1).getLastActiveProduct().getName(), "Cabinet");
+        Assert.assertEquals(entitlementsUpdated.get(1).getBillCycleDayLocal(), (Integer) 7);
+
+        events = ImmutableList.<BillingEvent>copyOf(billingInternalApi.getBillingEventsForAccountAndUpdateAccountBCD(account.getId(), null, internalCallContext));
+        Assert.assertEquals(events.size(), 3);
+        for (final BillingEvent billingEvent : events) {
+            Assert.assertEquals(billingEvent.getBillCycleDayLocal(), 7);
+        }
+    }
+
+    @Test(groups = "slow")
+    public void testBCDUpdateMultipleSubscriptionsAccountAndSubscriptionAligned() throws Exception {
+        final LocalDate initialDate = new LocalDate(2013, 8, 7);
+        clock.setDay(initialDate);
+
+        // Account with no BCD
+        final Account account = createAccount(getAccountData(0));
+        Assert.assertEquals(account.getBillCycleDayLocal(), (Integer) 0);
+
+        // Create 2 BASE entitlements
+        final String bundleKey1 = UUID.randomUUID().toString();
+        final String bundleKey2 = UUID.randomUUID().toString();
+        final EntitlementSpecifier entitlementSpecifierBase1 = new DefaultEntitlementSpecifier(new PlanPhaseSpecifier("Pistol", BillingPeriod.ANNUAL, "gunclubDiscountNoTrial", null));
+        final EntitlementSpecifier entitlementSpecifierBase2 = new DefaultEntitlementSpecifier(new PlanPhaseSpecifier("Pistol", BillingPeriod.MONTHLY, PriceListSet.DEFAULT_PRICELIST_NAME, null));
+        final BaseEntitlementWithAddOnsSpecifier specifier1 = new DefaultBaseEntitlementWithAddOnsSpecifier(null, bundleKey1, ImmutableList.of(entitlementSpecifierBase1), null, null, false);
+        final BaseEntitlementWithAddOnsSpecifier specifier2 = new DefaultBaseEntitlementWithAddOnsSpecifier(null, bundleKey2, ImmutableList.of(entitlementSpecifierBase2), null, null, false);
+        testListener.pushExpectedEvents(NextEvent.CREATE, NextEvent.BLOCK, NextEvent.CREATE, NextEvent.BLOCK);
+        entitlementApi.createBaseEntitlementsWithAddOns(account.getId(),
+                                                        ImmutableList.of(specifier1, specifier2),
+                                                        false,
+                                                        ImmutableList.<PluginProperty>of(),
+                                                        callContext);
+        assertListenerStatus();
+
+        final List<Entitlement> entitlements = entitlementApi.getAllEntitlementsForAccountId(account.getId(), callContext);
+        Assert.assertEquals(entitlements.size(), 2);
+        for (final Entitlement entitlement : entitlements) {
+            if ("pistol-annual-gunclub-discount-notrial".equals(entitlement.getLastActivePlan().getName())) {
+                // SUBSCRIPTION aligned
+                Assert.assertEquals(entitlement.getBillCycleDayLocal(), (Integer) 7);
+            } else {
+                // ACCOUNT aligned
+                Assert.assertNull(entitlement.getBillCycleDayLocal());
+            }
+        }
+
+        // Account still has no BCD
+        final Account accountNoBCD = accountApi.getAccountById(account.getId(), callContext);
+        Assert.assertEquals(accountNoBCD.getBillCycleDayLocal(), (Integer) 0);
+
+        List<BillingEvent> events = ImmutableList.<BillingEvent>copyOf(billingInternalApi.getBillingEventsForAccountAndUpdateAccountBCD(account.getId(), null, internalCallContext));
+        Assert.assertEquals(events.size(), 4);
+        for (final BillingEvent billingEvent : events) {
+            if ("pistol-annual-gunclub-discount-notrial".equals(billingEvent.getPlan().getName())) {
+                Assert.assertEquals(billingEvent.getBillCycleDayLocal(), 7);
+            } else {
+                Assert.assertEquals(billingEvent.getBillCycleDayLocal(), 6);
+            }
+        }
+
+        // Verify BCD
+        final Account accountWithBCD = accountApi.getAccountById(account.getId(), callContext);
+        Assert.assertEquals(accountWithBCD.getBillCycleDayLocal(), (Integer) 6);
+
+        // Verify GET
+        final List<Entitlement> entitlementsUpdated = entitlementApi.getAllEntitlementsForAccountId(account.getId(), callContext);
+        Assert.assertEquals(entitlementsUpdated.size(), 2);
+        for (final Entitlement entitlement : entitlementsUpdated) {
+            if ("pistol-annual-gunclub-discount-notrial".equals(entitlement.getLastActivePlan().getName())) {
+                Assert.assertEquals(entitlement.getBillCycleDayLocal(), (Integer) 7);
+            } else {
+                Assert.assertEquals(entitlement.getBillCycleDayLocal(), (Integer) 6);
+            }
+        }
+
+        events = ImmutableList.<BillingEvent>copyOf(billingInternalApi.getBillingEventsForAccountAndUpdateAccountBCD(account.getId(), null, internalCallContext));
+        Assert.assertEquals(events.size(), 4);
+        for (final BillingEvent billingEvent : events) {
+            if ("pistol-annual-gunclub-discount-notrial".equals(billingEvent.getPlan().getName())) {
+                Assert.assertEquals(billingEvent.getBillCycleDayLocal(), 7);
+            } else {
+                Assert.assertEquals(billingEvent.getBillCycleDayLocal(), 6);
+            }
+        }
+    }
 
     // This test was originally for https://github.com/killbill/killbill/issues/123.
     // The invocationCount > 0 was to trigger an issue where events would come out-of-order randomly.
@@ -60,7 +298,8 @@ public class TestDefaultInternalBillingApi extends JunctionTestSuiteWithEmbedded
 
         testListener.pushExpectedEvents(NextEvent.CREATE, NextEvent.BLOCK);
         final PlanPhaseSpecifier spec = new PlanPhaseSpecifier("Shotgun", BillingPeriod.MONTHLY, PriceListSet.DEFAULT_PRICELIST_NAME, null);
-        final Entitlement entitlement = entitlementApi.createBaseEntitlement(account.getId(), spec, account.getExternalKey(), null, null, null, false, ImmutableList.<PluginProperty>of(), callContext);
+        final UUID entitlementId = entitlementApi.createBaseEntitlement(account.getId(), new DefaultEntitlementSpecifier(spec), account.getExternalKey(), null, null, false, true, ImmutableList.<PluginProperty>of(), callContext);
+        final Entitlement entitlement = entitlementApi.getEntitlementForId(entitlementId, callContext);
         final SubscriptionBase subscription = subscriptionInternalApi.getSubscriptionFromId(entitlement.getId(), internalCallContext);
         assertListenerStatus();
 
@@ -69,7 +308,7 @@ public class TestDefaultInternalBillingApi extends JunctionTestSuiteWithEmbedded
         final DefaultBlockingState state1 = new DefaultBlockingState(account.getId(),
                                                                      BlockingStateType.ACCOUNT,
                                                                      DefaultEntitlementApi.ENT_STATE_BLOCKED,
-                                                                     EntitlementService.ENTITLEMENT_SERVICE_NAME,
+                                                                     KILLBILL_SERVICES.ENTITLEMENT_SERVICE.getServiceName(),
                                                                      true,
                                                                      true,
                                                                      true,
@@ -79,7 +318,7 @@ public class TestDefaultInternalBillingApi extends JunctionTestSuiteWithEmbedded
         final DefaultBlockingState state2 = new DefaultBlockingState(account.getId(),
                                                                      BlockingStateType.ACCOUNT,
                                                                      DefaultEntitlementApi.ENT_STATE_CLEAR,
-                                                                     EntitlementService.ENTITLEMENT_SERVICE_NAME,
+                                                                     KILLBILL_SERVICES.ENTITLEMENT_SERVICE.getServiceName(),
                                                                      false,
                                                                      false,
                                                                      false,
@@ -94,7 +333,7 @@ public class TestDefaultInternalBillingApi extends JunctionTestSuiteWithEmbedded
         final DefaultBlockingState state3 = new DefaultBlockingState(entitlement.getBundleId(),
                                                                      BlockingStateType.SUBSCRIPTION_BUNDLE,
                                                                      DefaultEntitlementApi.ENT_STATE_BLOCKED,
-                                                                     EntitlementService.ENTITLEMENT_SERVICE_NAME,
+                                                                     KILLBILL_SERVICES.ENTITLEMENT_SERVICE.getServiceName(),
                                                                      true,
                                                                      true,
                                                                      true,
@@ -104,7 +343,7 @@ public class TestDefaultInternalBillingApi extends JunctionTestSuiteWithEmbedded
         final DefaultBlockingState state4 = new DefaultBlockingState(entitlement.getBundleId(),
                                                                      BlockingStateType.SUBSCRIPTION_BUNDLE,
                                                                      DefaultEntitlementApi.ENT_STATE_CLEAR,
-                                                                     EntitlementService.ENTITLEMENT_SERVICE_NAME,
+                                                                     KILLBILL_SERVICES.ENTITLEMENT_SERVICE.getServiceName(),
                                                                      false,
                                                                      false,
                                                                      false,
@@ -129,7 +368,7 @@ public class TestDefaultInternalBillingApi extends JunctionTestSuiteWithEmbedded
         final DefaultBlockingState state6 = new DefaultBlockingState(entitlement.getBundleId(),
                                                                      BlockingStateType.SUBSCRIPTION_BUNDLE,
                                                                      DefaultEntitlementApi.ENT_STATE_CLEAR + "-something",
-                                                                     EntitlementService.ENTITLEMENT_SERVICE_NAME,
+                                                                     KILLBILL_SERVICES.ENTITLEMENT_SERVICE.getServiceName(),
                                                                      false,
                                                                      false,
                                                                      false,
@@ -138,7 +377,7 @@ public class TestDefaultInternalBillingApi extends JunctionTestSuiteWithEmbedded
         final DefaultBlockingState state5 = new DefaultBlockingState(entitlement.getBundleId(),
                                                                      BlockingStateType.SUBSCRIPTION_BUNDLE,
                                                                      DefaultEntitlementApi.ENT_STATE_BLOCKED + "-something",
-                                                                     EntitlementService.ENTITLEMENT_SERVICE_NAME,
+                                                                     KILLBILL_SERVICES.ENTITLEMENT_SERVICE.getServiceName(),
                                                                      true,
                                                                      true,
                                                                      true,
@@ -152,7 +391,7 @@ public class TestDefaultInternalBillingApi extends JunctionTestSuiteWithEmbedded
         final DefaultBlockingState state7 = new DefaultBlockingState(account.getId(),
                                                                      BlockingStateType.ACCOUNT,
                                                                      DefaultEntitlementApi.ENT_STATE_BLOCKED + "-something2",
-                                                                     EntitlementService.ENTITLEMENT_SERVICE_NAME,
+                                                                     KILLBILL_SERVICES.ENTITLEMENT_SERVICE.getServiceName(),
                                                                      true,
                                                                      true,
                                                                      true,
@@ -161,7 +400,7 @@ public class TestDefaultInternalBillingApi extends JunctionTestSuiteWithEmbedded
         final DefaultBlockingState state8 = new DefaultBlockingState(account.getId(),
                                                                      BlockingStateType.ACCOUNT,
                                                                      DefaultEntitlementApi.ENT_STATE_CLEAR + "-something2",
-                                                                     EntitlementService.ENTITLEMENT_SERVICE_NAME,
+                                                                     KILLBILL_SERVICES.ENTITLEMENT_SERVICE.getServiceName(),
                                                                      false,
                                                                      false,
                                                                      false,
@@ -181,9 +420,9 @@ public class TestDefaultInternalBillingApi extends JunctionTestSuiteWithEmbedded
         Assert.assertEquals(events.get(0).getTransitionType(), SubscriptionBaseTransitionType.CREATE);
         Assert.assertEquals(events.get(0).getEffectiveDate(), subscription.getStartDate());
         Assert.assertEquals(events.get(1).getTransitionType(), SubscriptionBaseTransitionType.START_BILLING_DISABLED);
-        Assert.assertEquals(events.get(1).getEffectiveDate(), block3Date);
+        Assert.assertEquals(events.get(1).getEffectiveDate().compareTo(block3Date), 0);
         Assert.assertEquals(events.get(2).getTransitionType(), SubscriptionBaseTransitionType.END_BILLING_DISABLED);
-        Assert.assertEquals(events.get(2).getEffectiveDate(), block5Date);
+        Assert.assertEquals(events.get(2).getEffectiveDate().compareTo(block5Date), 0);
     }
 
     // See https://github.com/killbill/killbill/commit/92042843e38a67f75495b207385e4c1f9ca60990#commitcomment-4749967
@@ -205,7 +444,8 @@ public class TestDefaultInternalBillingApi extends JunctionTestSuiteWithEmbedded
 
         testListener.pushExpectedEvents(NextEvent.CREATE, NextEvent.BLOCK);
         final PlanPhaseSpecifier spec = new PlanPhaseSpecifier("Shotgun", BillingPeriod.MONTHLY, PriceListSet.DEFAULT_PRICELIST_NAME, null);
-        final Entitlement entitlement = entitlementApi.createBaseEntitlement(account.getId(), spec, account.getExternalKey(), null, null, null, false, ImmutableList.<PluginProperty>of(), callContext);
+        final UUID entitlementId = entitlementApi.createBaseEntitlement(account.getId(), new DefaultEntitlementSpecifier(spec), account.getExternalKey(), null, null, false, true, ImmutableList.<PluginProperty>of(), callContext);
+        final Entitlement entitlement = entitlementApi.getEntitlementForId(entitlementId, callContext);
         final SubscriptionBase subscription = subscriptionInternalApi.getSubscriptionFromId(entitlement.getId(), internalCallContext);
         assertListenerStatus();
 
@@ -217,7 +457,7 @@ public class TestDefaultInternalBillingApi extends JunctionTestSuiteWithEmbedded
         final DefaultBlockingState state1 = new DefaultBlockingState(account.getId(),
                                                                      BlockingStateType.ACCOUNT,
                                                                      DefaultEntitlementApi.ENT_STATE_BLOCKED,
-                                                                     EntitlementService.ENTITLEMENT_SERVICE_NAME,
+                                                                     KILLBILL_SERVICES.ENTITLEMENT_SERVICE.getServiceName(),
                                                                      true,
                                                                      true,
                                                                      true,
@@ -232,7 +472,7 @@ public class TestDefaultInternalBillingApi extends JunctionTestSuiteWithEmbedded
         final DefaultBlockingState state2 = new DefaultBlockingState(account.getId(),
                                                                      BlockingStateType.ACCOUNT,
                                                                      DefaultEntitlementApi.ENT_STATE_CLEAR,
-                                                                     EntitlementService.ENTITLEMENT_SERVICE_NAME,
+                                                                     KILLBILL_SERVICES.ENTITLEMENT_SERVICE.getServiceName(),
                                                                      false,
                                                                      false,
                                                                      false,
@@ -242,7 +482,7 @@ public class TestDefaultInternalBillingApi extends JunctionTestSuiteWithEmbedded
         final DefaultBlockingState state3 = new DefaultBlockingState(account.getId(),
                                                                      BlockingStateType.ACCOUNT,
                                                                      DefaultEntitlementApi.ENT_STATE_BLOCKED,
-                                                                     EntitlementService.ENTITLEMENT_SERVICE_NAME,
+                                                                     KILLBILL_SERVICES.ENTITLEMENT_SERVICE.getServiceName(),
                                                                      true,
                                                                      true,
                                                                      true,

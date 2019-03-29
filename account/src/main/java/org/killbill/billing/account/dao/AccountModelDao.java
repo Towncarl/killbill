@@ -1,7 +1,7 @@
 /*
  * Copyright 2010-2013 Ning, Inc.
- * Copyright 2014-2017 Groupon, Inc
- * Copyright 2014-2017 The Billing Project, LLC
+ * Copyright 2014-2018 Groupon, Inc
+ * Copyright 2014-2018 The Billing Project, LLC
  *
  * The Billing Project licenses this file to you under the Apache License, version 2.0
  * (the "License"); you may not use this file except in compliance with the
@@ -48,6 +48,7 @@ public class AccountModelDao extends EntityModelDaoBase implements TimeZoneAware
     private Boolean isPaymentDelegatedToParent;
     private int billingCycleDayLocal;
     private UUID paymentMethodId;
+    private DateTime referenceTime;
     private DateTimeZone timeZone;
     private String locale;
     private String address1;
@@ -60,20 +61,18 @@ public class AccountModelDao extends EntityModelDaoBase implements TimeZoneAware
     private String phone;
     private String notes;
     private Boolean migrated;
-    private Boolean isNotifiedForInvoices;
-
 
     public AccountModelDao() { /* For the DAO mapper */ }
 
-    public AccountModelDao(final UUID id, final DateTime createdDate, final DateTime updatedDate, final String externalKey,
-                           final String email, final String name, final Integer firstNameLength, final Currency currency,
-                           final UUID parentAccountId, final Boolean isPaymentDelegatedToParent,
-                           final int billingCycleDayLocal, final UUID paymentMethodId, final DateTimeZone timeZone,
-                           final String locale, final String address1, final String address2, final String companyName,
-                           final String city, final String stateOrProvince, final String country, final String postalCode,
-                           final String phone, final String notes, final Boolean migrated, final Boolean notifiedForInvoices) {
+    private AccountModelDao(final UUID id, final DateTime createdDate, final DateTime updatedDate, final String externalKey,
+                            final String email, final String name, final Integer firstNameLength, final Currency currency,
+                            final UUID parentAccountId, final Boolean isPaymentDelegatedToParent,
+                            final int billingCycleDayLocal, final UUID paymentMethodId, final DateTime referenceTime, final DateTimeZone timeZone,
+                            final String locale, final String address1, final String address2, final String companyName,
+                            final String city, final String stateOrProvince, final String country, final String postalCode,
+                            final String phone, final String notes, final Boolean migrated, final boolean withDefaults) {
         super(id, createdDate, updatedDate);
-        this.externalKey = MoreObjects.firstNonNull(externalKey, id.toString());
+        this.externalKey = !withDefaults ? externalKey : MoreObjects.firstNonNull(externalKey, id.toString());
         this.email = email;
         this.name = name;
         this.firstNameLength = firstNameLength;
@@ -82,7 +81,8 @@ public class AccountModelDao extends EntityModelDaoBase implements TimeZoneAware
         this.isPaymentDelegatedToParent = isPaymentDelegatedToParent;
         this.billingCycleDayLocal = billingCycleDayLocal;
         this.paymentMethodId = paymentMethodId;
-        this.timeZone = MoreObjects.firstNonNull(timeZone, DateTimeZone.UTC);
+        this.referenceTime = referenceTime;
+        this.timeZone = !withDefaults ? timeZone : MoreObjects.firstNonNull(timeZone, DateTimeZone.UTC);
         this.locale = locale;
         this.address1 = address1;
         this.address2 = address2;
@@ -94,10 +94,9 @@ public class AccountModelDao extends EntityModelDaoBase implements TimeZoneAware
         this.phone = phone;
         this.notes = notes;
         this.migrated = migrated;
-        this.isNotifiedForInvoices = notifiedForInvoices;
     }
 
-    public AccountModelDao(final UUID id, @Nullable final DateTime createdDate, final DateTime updatedDate, final AccountData account) {
+    public AccountModelDao(final UUID id, @Nullable final DateTime createdDate, @Nullable final DateTime updatedDate, final AccountData account, final boolean withDefaults) {
         this(id,
              createdDate,
              updatedDate,
@@ -110,6 +109,7 @@ public class AccountModelDao extends EntityModelDaoBase implements TimeZoneAware
              account.isPaymentDelegatedToParent(),
              MoreObjects.firstNonNull(account.getBillCycleDayLocal(), DEFAULT_BILLING_CYCLE_DAY_LOCAL),
              account.getPaymentMethodId(),
+             account.getReferenceTime() != null ? account.getReferenceTime() : createdDate,
              account.getTimeZone(),
              account.getLocale(),
              account.getAddress1(),
@@ -122,16 +122,99 @@ public class AccountModelDao extends EntityModelDaoBase implements TimeZoneAware
              account.getPhone(),
              account.getNotes(),
              account.isMigrated(),
-             // There is a NOT NULL constraint on the is_notified_for_invoices column
-             MoreObjects.firstNonNull(account.isNotifiedForInvoices(), false));
+             withDefaults);
     }
 
-    public AccountModelDao(final UUID id, final AccountData account) {
-        this(id, null, null, account);
+
+    public AccountModelDao(final UUID accountId, final AccountData account) {
+        this(accountId, null, null, account, true);
     }
 
     public AccountModelDao(final AccountData account) {
-        this(UUIDs.randomUUID(), account);
+        this(UUIDs.randomUUID(), null, null, account, true);
+    }
+
+    public void mergeWithDelegate(final AccountModelDao currentAccount) {
+        setExternalKey(currentAccount.getExternalKey());
+
+        setCurrency(currentAccount.getCurrency());
+
+        if (currentAccount.getBillingCycleDayLocal() == DEFAULT_BILLING_CYCLE_DAY_LOCAL && // There is *not* already a BCD set
+            billingCycleDayLocal != DEFAULT_BILLING_CYCLE_DAY_LOCAL) {  // and the proposed date is not 0
+            setBillingCycleDayLocal(billingCycleDayLocal);
+        } else {
+            setBillingCycleDayLocal(currentAccount.getBillingCycleDayLocal());
+        }
+
+        // Set all updatable fields with the new values if non null, otherwise defaults to the current values
+        setEmail(email != null ? email : currentAccount.getEmail());
+        setName(name != null ? name : currentAccount.getName());
+        final Integer firstNameLength = this.firstNameLength != null ? this.firstNameLength : currentAccount.getFirstNameLength();
+        if (firstNameLength != null) {
+            setFirstNameLength(firstNameLength);
+        }
+        setPaymentMethodId(paymentMethodId != null ? paymentMethodId : currentAccount.getPaymentMethodId());
+        setTimeZone(timeZone != null ? timeZone : currentAccount.getTimeZone());
+        setLocale(locale != null ? locale : currentAccount.getLocale());
+        setAddress1(address1 != null ? address1 : currentAccount.getAddress1());
+        setAddress2(address2 != null ? address2 : currentAccount.getAddress2());
+        setCompanyName(companyName != null ? companyName : currentAccount.getCompanyName());
+        setCity(city != null ? city : currentAccount.getCity());
+        setStateOrProvince(stateOrProvince != null ? stateOrProvince : currentAccount.getStateOrProvince());
+        setCountry(country != null ? country : currentAccount.getCountry());
+        setPostalCode(postalCode != null ? postalCode : currentAccount.getPostalCode());
+        setPhone(phone != null ? phone : currentAccount.getPhone());
+        setNotes(notes != null ? notes : currentAccount.getNotes());
+        setParentAccountId(parentAccountId != null ? parentAccountId : currentAccount.getParentAccountId());
+        setIsPaymentDelegatedToParent(isPaymentDelegatedToParent != null ? isPaymentDelegatedToParent : currentAccount.getIsPaymentDelegatedToParent());
+        final Boolean isMigrated = this.migrated != null ? this.migrated : currentAccount.getMigrated();
+        if (isMigrated != null) {
+            setMigrated(isMigrated);
+        }
+    }
+
+    public void validateAccountUpdateInput(final AccountModelDao currentAccount, final boolean ignoreNullInput) {
+        //
+        // We don't allow update on the following fields:
+        //
+        // All these conditions are written in the exact same way:
+        //
+        // There is already a defined value BUT those don't match (either input is null or different) => Not Allowed
+        // * ignoreNullInput = false (case where we allow to reset values)
+        // * ignoreNullInput = true (case where we DON'T allow to reset values and so if such value is null we ignore the check)
+        //
+        //
+        if ((ignoreNullInput || externalKey != null) &&
+            currentAccount.getExternalKey() != null &&
+            !currentAccount.getExternalKey().equals(externalKey)) {
+            throw new IllegalArgumentException(String.format("Killbill doesn't support updating the account external key: new=%s, current=%s",
+                                                             externalKey, currentAccount.getExternalKey()));
+        }
+
+        if ((ignoreNullInput || currency != null) &&
+            currentAccount.getCurrency() != null &&
+            !currentAccount.getCurrency().equals(currency)) {
+            throw new IllegalArgumentException(String.format("Killbill doesn't support updating the account currency: new=%s, current=%s",
+                                                             currency, currentAccount.getCurrency()));
+        }
+
+        if ((ignoreNullInput || (billingCycleDayLocal != DEFAULT_BILLING_CYCLE_DAY_LOCAL)) &&
+            currentAccount.getBillingCycleDayLocal() != DEFAULT_BILLING_CYCLE_DAY_LOCAL && // There is already a BCD set
+            !currentAccount.getBillingCycleDayLocal().equals(billingCycleDayLocal)) { // and it does not match we we have
+            throw new IllegalArgumentException(String.format("Killbill doesn't support updating the account BCD: new=%s, current=%s", billingCycleDayLocal, currentAccount.getBillingCycleDayLocal()));
+        }
+
+        if ((ignoreNullInput || timeZone != null) &&
+            currentAccount.getTimeZone() != null &&
+            !currentAccount.getTimeZone().equals(timeZone)) {
+            throw new IllegalArgumentException(String.format("Killbill doesn't support updating the account timeZone: new=%s, current=%s",
+                                                             timeZone, currentAccount.getTimeZone()));
+        }
+
+        if (referenceTime != null && currentAccount.getReferenceTime().withMillisOfDay(0).compareTo(referenceTime.withMillisOfDay(0)) != 0) {
+            throw new IllegalArgumentException(String.format("Killbill doesn't support updating the account referenceTime: new=%s, current=%s",
+                                                             referenceTime, currentAccount.getReferenceTime()));
+        }
     }
 
     @Override
@@ -213,6 +296,15 @@ public class AccountModelDao extends EntityModelDaoBase implements TimeZoneAware
 
     public void setPaymentMethodId(final UUID paymentMethodId) {
         this.paymentMethodId = paymentMethodId;
+    }
+
+    @Override
+    public DateTime getReferenceTime() {
+        return referenceTime;
+    }
+
+    public void setReferenceTime(final DateTime referenceTime) {
+        this.referenceTime = referenceTime;
     }
 
     @Override
@@ -312,16 +404,6 @@ public class AccountModelDao extends EntityModelDaoBase implements TimeZoneAware
         this.migrated = migrated;
     }
 
-    // TODO Required for making the BindBeanFactory with Introspector work
-    // see Introspector line 571; they look at public method.
-    public Boolean getIsNotifiedForInvoices() {
-        return isNotifiedForInvoices;
-    }
-
-    public void setIsNotifiedForInvoices(final Boolean isNotifiedForInvoices) {
-        this.isNotifiedForInvoices = isNotifiedForInvoices;
-    }
-
     @Override
     public String toString() {
         final StringBuilder sb = new StringBuilder();
@@ -335,6 +417,7 @@ public class AccountModelDao extends EntityModelDaoBase implements TimeZoneAware
         sb.append(", isPaymentDelegatedToParent=").append(isPaymentDelegatedToParent);
         sb.append(", billingCycleDayLocal=").append(billingCycleDayLocal);
         sb.append(", paymentMethodId=").append(paymentMethodId);
+        sb.append(", referenceTime=").append(referenceTime);
         sb.append(", timeZone=").append(timeZone);
         sb.append(", locale='").append(locale).append('\'');
         sb.append(", address1='").append(address1).append('\'');
@@ -347,7 +430,6 @@ public class AccountModelDao extends EntityModelDaoBase implements TimeZoneAware
         sb.append(", phone='").append(phone).append('\'');
         sb.append(", notes='").append(notes).append('\'');
         sb.append(", migrated=").append(migrated);
-        sb.append(", isNotifiedForInvoices=").append(isNotifiedForInvoices);
         sb.append('}');
         return sb.toString();
     }
@@ -405,9 +487,6 @@ public class AccountModelDao extends EntityModelDaoBase implements TimeZoneAware
         if (migrated != null ? !migrated.equals(that.migrated) : that.migrated != null) {
             return false;
         }
-        if (isNotifiedForInvoices != null ? !isNotifiedForInvoices.equals(that.isNotifiedForInvoices) : that.isNotifiedForInvoices != null) {
-            return false;
-        }
         if (locale != null ? !locale.equals(that.locale) : that.locale != null) {
             return false;
         }
@@ -429,10 +508,12 @@ public class AccountModelDao extends EntityModelDaoBase implements TimeZoneAware
         if (stateOrProvince != null ? !stateOrProvince.equals(that.stateOrProvince) : that.stateOrProvince != null) {
             return false;
         }
+        if (referenceTime != null ? referenceTime.compareTo(that.referenceTime) != 0 : that.referenceTime != null) {
+            return false;
+        }
         if (timeZone != null ? !timeZone.equals(that.timeZone) : that.timeZone != null) {
             return false;
         }
-
         return true;
     }
 
@@ -448,6 +529,7 @@ public class AccountModelDao extends EntityModelDaoBase implements TimeZoneAware
         result = 31 * result + (isPaymentDelegatedToParent != null ? isPaymentDelegatedToParent.hashCode() : 0);
         result = 31 * result + billingCycleDayLocal;
         result = 31 * result + (paymentMethodId != null ? paymentMethodId.hashCode() : 0);
+        result = 31 * result + (referenceTime != null ? referenceTime.hashCode() : 0);
         result = 31 * result + (timeZone != null ? timeZone.hashCode() : 0);
         result = 31 * result + (locale != null ? locale.hashCode() : 0);
         result = 31 * result + (address1 != null ? address1.hashCode() : 0);
@@ -460,7 +542,6 @@ public class AccountModelDao extends EntityModelDaoBase implements TimeZoneAware
         result = 31 * result + (phone != null ? phone.hashCode() : 0);
         result = 31 * result + (notes != null ? notes.hashCode() : 0);
         result = 31 * result + (migrated != null ? migrated.hashCode() : 0);
-        result = 31 * result + (isNotifiedForInvoices != null ? isNotifiedForInvoices.hashCode() : 0);
         return result;
     }
 

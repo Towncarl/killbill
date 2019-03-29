@@ -23,10 +23,7 @@ import org.killbill.billing.overdue.OverdueProperties;
 import org.killbill.billing.overdue.OverdueService;
 import org.killbill.billing.overdue.api.DefaultOverdueApi;
 import org.killbill.billing.overdue.api.OverdueApi;
-import org.killbill.billing.overdue.applicator.OverdueEmailGenerator;
-import org.killbill.billing.overdue.applicator.formatters.DefaultOverdueEmailFormatterFactory;
-import org.killbill.billing.overdue.applicator.formatters.OverdueEmailFormatterFactory;
-import org.killbill.billing.overdue.caching.EhCacheOverdueConfigCache;
+import org.killbill.billing.overdue.caching.DefaultOverdueConfigCache;
 import org.killbill.billing.overdue.caching.OverdueCacheInvalidationCallback;
 import org.killbill.billing.overdue.caching.OverdueConfigCache;
 import org.killbill.billing.overdue.listener.OverdueListener;
@@ -64,7 +61,6 @@ public class DefaultOverdueModule extends KillBillModule implements OverdueModul
         // internal bindings
         installOverdueService();
         installOverdueWrapperFactory();
-        installOverdueEmail();
 
         final OverdueProperties config = new ConfigurationObjectFactory(skifeConfigSource).build(OverdueProperties.class);
         bind(OverdueProperties.class).toInstance(config);
@@ -86,18 +82,13 @@ public class DefaultOverdueModule extends KillBillModule implements OverdueModul
         bind(OverdueWrapperFactory.class).asEagerSingleton();
     }
 
-    protected void installOverdueEmail() {
-        bind(OverdueEmailFormatterFactory.class).to(DefaultOverdueEmailFormatterFactory.class).asEagerSingleton();
-        bind(OverdueEmailGenerator.class).asEagerSingleton();
-    }
-
     @Override
     public void installOverdueUserApi() {
         bind(OverdueApi.class).to(DefaultOverdueApi.class).asEagerSingleton();
     }
 
     public void installOverdueConfigCache() {
-        bind(OverdueConfigCache.class).to(EhCacheOverdueConfigCache.class).asEagerSingleton();
+        bind(OverdueConfigCache.class).to(DefaultOverdueConfigCache.class).asEagerSingleton();
         bind(CacheInvalidationCallback.class).annotatedWith(Names.named(OVERDUE_INVALIDATION_CALLBACK)).to(OverdueCacheInvalidationCallback.class).asEagerSingleton();
     }
 }

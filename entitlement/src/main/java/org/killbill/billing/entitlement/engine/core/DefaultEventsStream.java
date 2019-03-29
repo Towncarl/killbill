@@ -33,7 +33,6 @@ import org.killbill.billing.callcontext.InternalTenantContext;
 import org.killbill.billing.catalog.api.Plan;
 import org.killbill.billing.catalog.api.Product;
 import org.killbill.billing.catalog.api.ProductCategory;
-import org.killbill.billing.entitlement.EntitlementService;
 import org.killbill.billing.entitlement.EventsStream;
 import org.killbill.billing.entitlement.api.BlockingState;
 import org.killbill.billing.entitlement.api.BlockingStateType;
@@ -42,6 +41,7 @@ import org.killbill.billing.entitlement.api.Entitlement.EntitlementState;
 import org.killbill.billing.entitlement.block.BlockingChecker;
 import org.killbill.billing.entitlement.block.BlockingChecker.BlockingAggregator;
 import org.killbill.billing.junction.DefaultBlockingState;
+import org.killbill.billing.platform.api.KillbillService.KILLBILL_SERVICES;
 import org.killbill.billing.subscription.api.SubscriptionBase;
 import org.killbill.billing.subscription.api.SubscriptionBaseTransitionType;
 import org.killbill.billing.subscription.api.user.SubscriptionBaseBundle;
@@ -60,18 +60,18 @@ public class DefaultEventsStream implements EventsStream {
     private final ImmutableAccountData account;
     private final SubscriptionBaseBundle bundle;
     // All blocking states for the account, associated bundle or subscription
-    private final List<BlockingState> blockingStates;
+    private final Collection<BlockingState> blockingStates;
     private final BlockingChecker blockingChecker;
     // Base subscription for the bundle if it exists, null otherwise
     private final SubscriptionBase baseSubscription;
     // Subscription associated with this entitlement (equals to baseSubscription for base subscriptions)
     private final SubscriptionBase subscription;
     // All subscriptions for that bundle
-    private final List<SubscriptionBase> allSubscriptionsForBundle;
+    private final Collection<SubscriptionBase> allSubscriptionsForBundle;
     private final InternalTenantContext internalTenantContext;
     private final DateTime utcNow;
     private final LocalDate utcToday;
-    private final int defaultBillCycleDayLocal;
+    private final Integer defaultBillCycleDayLocal;
 
     private BlockingAggregator currentStateBlockingAggregator;
     private List<BlockingState> subscriptionEntitlementStates;
@@ -85,11 +85,14 @@ public class DefaultEventsStream implements EventsStream {
     private BlockingState entitlementCancelEvent;
     private EntitlementState entitlementState;
 
-    public DefaultEventsStream(final ImmutableAccountData account, final SubscriptionBaseBundle bundle,
-                               final List<BlockingState> blockingStates, final BlockingChecker blockingChecker,
-                               @Nullable final SubscriptionBase baseSubscription, final SubscriptionBase subscription,
-                               final List<SubscriptionBase> allSubscriptionsForBundle,
-                               final int defaultBillCycleDayLocal,
+    public DefaultEventsStream(final ImmutableAccountData account,
+                               final SubscriptionBaseBundle bundle,
+                               final Collection<BlockingState> blockingStates,
+                               final BlockingChecker blockingChecker,
+                               @Nullable final SubscriptionBase baseSubscription,
+                               final SubscriptionBase subscription,
+                               final Collection<SubscriptionBase> allSubscriptionsForBundle,
+                               @Nullable final Integer defaultBillCycleDayLocal,
                                final InternalTenantContext contextWithValidAccountRecordId, final DateTime utcNow) {
         sanityChecks(account, bundle, baseSubscription, subscription);
         this.account = account;
@@ -223,7 +226,14 @@ public class DefaultEventsStream implements EventsStream {
     }
 
     @Override
-    public int getDefaultBillCycleDayLocal() {
+    public boolean isBlockEntitlement(final DateTime effectiveDate) {
+        Preconditions.checkState(effectiveDate != null);
+        final BlockingAggregator aggregator = getBlockingAggregator(effectiveDate);
+        return aggregator.isBlockEntitlement();
+    }
+
+    @Override
+    public Integer getDefaultBillCycleDayLocal() {
         return defaultBillCycleDayLocal;
     }
 
@@ -398,7 +408,7 @@ public class DefaultEventsStream implements EventsStream {
                                                                                return new DefaultBlockingState(input.getId(),
                                                                                                                BlockingStateType.SUBSCRIPTION,
                                                                                                                DefaultEntitlementApi.ENT_STATE_CANCELLED,
-                                                                                                               EntitlementService.ENTITLEMENT_SERVICE_NAME,
+                                                                                                               KILLBILL_SERVICES.ENTITLEMENT_SERVICE.getServiceName(),
                                                                                                                true,
                                                                                                                true,
                                                                                                                false,
@@ -509,7 +519,7 @@ public class DefaultEventsStream implements EventsStream {
                                                                                        @Override
                                                                                        public boolean apply(final BlockingState input) {
                                                                                            return blockingStateType.equals(input.getType()) &&
-                                                                                                  EntitlementService.ENTITLEMENT_SERVICE_NAME.equals(input.getService()) &&
+                                                                                                  KILLBILL_SERVICES.ENTITLEMENT_SERVICE.getServiceName().equals(input.getService()) &&
                                                                                                   input.getBlockedId().equals(blockableId);
                                                                                        }
                                                                                    }));
